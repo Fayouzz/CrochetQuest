@@ -5,7 +5,11 @@ import com.crochetquest.app.data.local.PlayerProfile
 /** Pure helpers for XP / yarn math. They never produce a negative balance. */
 fun PlayerProfile.withReward(xp: Int, yarn: Int): PlayerProfile {
     require(xp >= 0 && yarn >= 0) { "rewards cannot be negative" }
-    return copy(totalXp = saturatingAdd(totalXp, xp), yarnBalance = saturatingAdd(yarnBalance, yarn))
+    return copy(
+        totalXp = saturatingAdd(totalXp, xp),
+        yarnBalance = saturatingAdd(yarnBalance, yarn),
+        lifetimeYarnEarned = saturatingAdd(lifetimeYarnEarned, yarn)
+    )
 }
 
 /** Returns the updated profile, or null when the cost is invalid or unaffordable. */

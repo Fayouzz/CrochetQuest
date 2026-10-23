@@ -20,6 +20,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.crochetquest.app.domain.quests.IconKey
 import com.crochetquest.app.ui.theme.CozyPalette
 import kotlin.math.floor
 
@@ -106,6 +107,106 @@ object Sprites {
             't' to Color(0xFFC48B6B)
         )
     )
+
+    private val gold = Color(0xFFF2C94C)
+
+    val star: PixelSprite = PixelSprite(
+        listOf(
+            "...yy...",
+            "...yy...",
+            "yyyyyyyy",
+            ".yyyyyy.",
+            "..yyyy..",
+            ".yyyyyy.",
+            ".yy..yy.",
+            "yy....yy"
+        ),
+        mapOf('y' to gold)
+    )
+
+    val gift: PixelSprite = PixelSprite(
+        listOf(
+            ".rr..rr.",
+            "..rrrr..",
+            "bbbrrbbb",
+            "bbbrrbbb",
+            "rrrrrrrr",
+            "bbbrrbbb",
+            "bbbrrbbb",
+            "bbbrrbbb"
+        ),
+        mapOf('r' to CozyPalette.DustyRose, 'b' to Color(0xFFB8A6DB))
+    )
+
+    val heart: PixelSprite = PixelSprite(
+        listOf(
+            ".rr..rr.",
+            "rrrrrrrr",
+            "rrrrrrrr",
+            "rrrrrrrr",
+            ".rrrrrr.",
+            "..rrrr..",
+            "...rr...",
+            "........"
+        ),
+        mapOf('r' to CozyPalette.DustyRose)
+    )
+
+    val trophy: PixelSprite = PixelSprite(
+        listOf(
+            "yyyyyyyy",
+            "yyyyyyyy",
+            ".yyyyyy.",
+            "..yyyy..",
+            "...yy...",
+            "...yy...",
+            "..yyyy..",
+            ".yyyyyy."
+        ),
+        mapOf('y' to gold)
+    )
+
+    val stitch: PixelSprite = PixelSprite(
+        listOf(
+            "..oooo..",
+            ".o....o.",
+            "o..oo..o",
+            "o.o..o.o",
+            "o.o..o.o",
+            "o..oo..o",
+            ".o....o.",
+            "..oooo.."
+        ),
+        mapOf('o' to CozyPalette.WarmBrown)
+    )
+
+    val flower: PixelSprite = PixelSprite(
+        listOf(
+            "..pppp..",
+            ".ppyypp.",
+            ".ppyypp.",
+            "..pppp..",
+            "...gg...",
+            "..ggg...",
+            "...gg.g.",
+            "...gg.gg"
+        ),
+        mapOf(
+            'p' to CozyPalette.DustyRose,
+            'y' to gold,
+            'g' to Color(0xFF8DB580)
+        )
+    )
+
+    fun forIcon(icon: IconKey): PixelSprite = when (icon) {
+        IconKey.YARN -> yarnBall
+        IconKey.STAR -> star
+        IconKey.GIFT -> gift
+        IconKey.FLOWER -> flower
+        IconKey.HEART -> heart
+        IconKey.TROPHY -> trophy
+        IconKey.STITCH -> stitch
+    }
 }
 
 /**
@@ -116,7 +217,9 @@ object Sprites {
 fun PixelSpriteImage(
     sprite: PixelSprite,
     modifier: Modifier = Modifier,
-    contentDescription: String? = null
+    contentDescription: String? = null,
+    /** When set, every pixel is drawn in this color (used for locked-achievement silhouettes). */
+    silhouette: Color? = null
 ) {
     val semanticsModifier = if (contentDescription != null) {
         Modifier.semantics { this.contentDescription = contentDescription }
@@ -132,7 +235,7 @@ fun PixelSpriteImage(
                 val color = sprite.colorAt(char)
                 if (color != null) {
                     drawRect(
-                        color = color,
+                        color = silhouette ?: color,
                         topLeft = Offset(offsetX + x * cell, offsetY + y * cell),
                         size = Size(cell, cell)
                     )

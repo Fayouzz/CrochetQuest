@@ -20,26 +20,41 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.crochetquest.app.data.local.ProjectUpdate
 import com.crochetquest.app.ui.GameUiState
 import com.crochetquest.app.ui.GameViewModel
 import com.crochetquest.app.ui.GameViewModelFactory
+import com.crochetquest.app.ui.screens.collection.CollectionScreen
 import com.crochetquest.app.ui.screens.home.HomeScreen
 import com.crochetquest.app.ui.screens.onboarding.OnboardingScreen
-import com.crochetquest.app.ui.screens.placeholder.ComingSoonScreen
+import com.crochetquest.app.ui.screens.projects.ProjectDetailScreen
+import com.crochetquest.app.ui.screens.projects.ProjectEditorScreen
+import com.crochetquest.app.ui.screens.projects.ProjectsScreen
+import com.crochetquest.app.ui.screens.quests.QuestsScreen
 import com.crochetquest.app.ui.screens.settings.SettingsScreen
 
 private const val SETTINGS_ROUTE = "settings"
+private const val PROJECT_DETAIL_ROUTE = "project/{id}"
+private const val PROJECT_EDIT_ROUTE = "project_edit/{id}"
+private const val ID_ARG = "id"
+
+private fun projectDetailRoute(id: Long) = "project/$id"
+private fun projectEditRoute(id: Long) = "project_edit/$id" // id 0 means "new project"
 
 private enum class TopLevelDestination(
     val route: String,
@@ -74,6 +89,14 @@ fun CrochetQuestRoot(
     }
 }
 
+private fun NavController.navigateTopLevel(route: String) {
+    navigate(route) {
+        popUpTo(graph.findStartDestination().id) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
+
 @Composable
 private fun MainScaffold(
     state: GameUiState.Ready,
@@ -94,15 +117,7 @@ private fun MainScaffold(
                     TopLevelDestination.entries.forEach { destination ->
                         NavigationBarItem(
                             selected = currentRoute == destination.route,
-                            onClick = {
-                                navController.navigate(destination.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            },
+                            onClick = { navController.navigateTopLevel(destination.route) },
                             icon = { Icon(destination.icon, contentDescription = null) },
                             label = { Text(destination.label) }
                         )
@@ -120,26 +135,30 @@ private fun MainScaffold(
                 HomeScreen(
                     state = state,
                     onLogSession = viewModel::logSession,
-                    onOpenSettings = { navController.navigate(SETTINGS_ROUTE) }
+                    onOpenSettings = { navController.navigate(SETTINGS_ROUTE) },
+                    onOpenQuests = { navController.navigateTopLevel(TopLevelDestination.QUESTS.route) },
+                    onOpenProjects = { navController.navigateTopLevel(TopLevelDestination.PROJECTS.route) },
+                    onAddProject = { navController.navigate(projectEditRoute(0)) },
+                    onOpenProject = { navController.navigate(projectDetailRoute(it)) },
+                    onClaimQuest = viewModel::claimQuest
                 )
             }
             composable(TopLevelDestination.QUESTS.route) {
-                ComingSoonScreen(
-                    title = "Quest Board",
-                    description = "Cozy, creative and project quests with rewards to claim."
+                QuestsScreen(
+                    items = state.questBoard,
+                    onClaim = viewModel::claimQuest,
+                    onMarkDone = viewModel::markQuestDone
                 )
             }
             composable(TopLevelDestination.PROJECTS.route) {
-                ComingSoonScreen(
-                    title = "Project Tracker",
-                    description = "Keep track of your real crochet projects, from planned to finished."
+                ProjectsScreen(
+                    projects = state.projects,
+                    onAddProject = { navController.navigate(projectEditRoute(0)) },
+                    onOpenProject = { navController.navigate(projectDetailRoute(it)) }
                 )
             }
             composable(TopLevelDestination.COLLECTION.route) {
-                ComingSoonScreen(
-                    title = "Collection",
-                    description = "Achievements, your wardrobe and the cat's cozy accessories."
-                )
+                CollectionScreen(achievements = state.achievements)
             }
             composable(SETTINGS_ROUTE) {
                 SettingsScreen(
@@ -148,6 +167,43 @@ private fun MainScaffold(
                     onRenameCat = viewModel::renameCat,
                     onAnimationsChange = viewModel::setAnimationsEnabled
                 )
+            }
+            composable(
+                route = PROJECT_DETAIL_ROUTE,
+                arguments = listOf(navArgument(ID_ARG) { type = NavType.LongType })
+            ) { entry ->
+                val projectId = entry.arguments?.getLong(ID_ARG) ?: 0L
+                val project = state.projects.firstOrNull { it.id == projectId }
+                val updatesFlow = remember(projectId) { viewModel.observeProjectUpdates(projectId) }
+                val updates by updatesFlow.collectAsState(initial = emptyList<ProjectUpdate>())
+                ProjectDetailScreen(
+                    project = project,
+                    updates = updates,
+                    onBack = { navController.popBackStack() },
+                    onEdit = { navController.navigate(projectEditRoute(projectId)) },
+                    onStart = { viewModel.startProject(projectId) },
+                    onSetProgress = { viewModel.setProjectProgress(projectId, it) },
+                    onFinish = { viewModel.completeProject(projectId) },
+                    onReopen = { viewModel.reopenProject(projectId) },
+                    onDelete = { viewModel.deleteProject(projectId) { navController.popBackStack() } }
+                )
+            }
+            composable(
+                route = PROJECT_EDIT_ROUTE,
+                arguments = listOf(navArgument(ID_ARG) { type = NavType.LongType })
+            ) { entry ->
+                val projectId = entry.arguments?.getLong(ID_ARG) ?: 0L
+                val existing = state.projects.firstOrNull { it.id == projectId }
+                if (projectId == 0L || existing != null) {
+                    ProjectEditorScreen(
+                        initial = existing,
+                        onSave = { draft -> viewModel.saveProject(draft) { navController.popBackStack() } },
+                        onBack = { navController.popBackStack() }
+                    )
+                } else {
+                    // The project vanished (for example it was just deleted): leave the editor.
+                    LaunchedEffect(projectId) { navController.popBackStack() }
+                }
             }
         }
     }

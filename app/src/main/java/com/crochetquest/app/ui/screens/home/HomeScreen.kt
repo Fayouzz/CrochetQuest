@@ -1,6 +1,7 @@
 package com.crochetquest.app.ui.screens.home
 
 import android.provider.Settings as AndroidSettings
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,20 +38,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.crochetquest.app.domain.game.RewardConfig
+import com.crochetquest.app.domain.quests.QuestItem
+import com.crochetquest.app.domain.quests.QuestStatus
 import com.crochetquest.app.ui.GameUiState
 import com.crochetquest.app.ui.components.BobbingCat
 import com.crochetquest.app.ui.components.CozyCard
 import com.crochetquest.app.ui.components.PixelSpriteImage
 import com.crochetquest.app.ui.components.Sprites
+import com.crochetquest.app.ui.screens.projects.ProgressBar
 
 @Composable
 fun HomeScreen(
     state: GameUiState.Ready,
     onLogSession: (durationMinutes: Int?, newStitch: String?) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenQuests: () -> Unit,
+    onOpenProjects: () -> Unit,
+    onAddProject: () -> Unit,
+    onOpenProject: (Long) -> Unit,
+    onClaimQuest: (questKey: String, periodKey: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showSessionDialog by rememberSaveable { mutableStateOf(false) }
@@ -92,6 +103,8 @@ fun HomeScreen(
             modifier = Modifier.fillMaxWidth()
         )
 
+        FeaturedQuestCard(state.featuredQuest, onOpenQuests, onClaimQuest)
+        ProjectsSummaryCard(state, onOpenProjects, onAddProject, onOpenProject)
         StatsCard(state)
     }
 
@@ -193,6 +206,102 @@ private fun Stat(value: Int, label: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+@Composable
+private fun FeaturedQuestCard(
+    quest: QuestItem?,
+    onOpenQuests: () -> Unit,
+    onClaim: (questKey: String, periodKey: String) -> Unit
+) {
+    CozyCard(modifier = Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.tertiaryContainer) {
+        if (quest == null) {
+            Text("Today's cozy quest", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "You've claimed every quest for now. Rest your hands, new ones appear soon.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            return@CozyCard
+        }
+        val definition = quest.definition
+        Text("Today's cozy quest", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PixelSpriteImage(Sprites.forIcon(definition.icon), Modifier.size(36.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(definition.title, style = MaterialTheme.typography.titleMedium)
+                Text(definition.description, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Reward: ${definition.reward.xp} XP + ${definition.reward.yarn} yarn balls · ${quest.status.label}",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (quest.status == QuestStatus.COMPLETED) {
+                Button(
+                    onClick = { onClaim(definition.key, quest.periodKey) },
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) { Text("Claim reward") }
+            }
+            OutlinedButton(
+                onClick = onOpenQuests,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) { Text("View Quest") }
+        }
+    }
+}
+
+@Composable
+private fun ProjectsSummaryCard(
+    state: GameUiState.Ready,
+    onOpenProjects: () -> Unit,
+    onAddProject: () -> Unit,
+    onOpenProject: (Long) -> Unit
+) {
+    val ongoing = state.ongoingProjects
+    CozyCard(modifier = Modifier.fillMaxWidth()) {
+        Text("Your projects", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        if (ongoing.isEmpty()) {
+            Text(
+                if (state.projects.isEmpty()) "Nothing on the hook yet. Add what you're making, or planning to make."
+                else "All your projects are finished. Time for something new?",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onAddProject,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
+                Text(if (state.projects.isEmpty()) "Add Your First Project" else "Add a project")
+            }
+        } else {
+            ongoing.take(3).forEach { project ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(role = Role.Button) { onOpenProject(project.id) }
+                        .padding(vertical = 6.dp)
+                ) {
+                    Text(project.name, style = MaterialTheme.typography.titleMedium)
+                    ProgressBar(project.progressPercent)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onOpenProjects, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(if (ongoing.size > 3) "See all ${ongoing.size} projects" else "Open projects")
+            }
+        }
     }
 }
 

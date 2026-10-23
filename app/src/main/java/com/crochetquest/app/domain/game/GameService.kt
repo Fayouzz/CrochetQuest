@@ -2,7 +2,20 @@ package com.crochetquest.app.domain.game
 
 import com.crochetquest.app.data.local.CrochetSession
 import com.crochetquest.app.data.local.PlayerProfile
+import com.crochetquest.app.data.local.Project
+import com.crochetquest.app.data.local.ProjectUpdate
+import com.crochetquest.app.data.local.QuestCompletion
 import com.crochetquest.app.data.local.StitchRecord
+import com.crochetquest.app.domain.achievements.AchievementCatalog
+import com.crochetquest.app.domain.achievements.AchievementItem
+import com.crochetquest.app.domain.projects.ProjectDraft
+import com.crochetquest.app.domain.projects.ProjectStatus
+import com.crochetquest.app.domain.projects.statusEnum
+import com.crochetquest.app.domain.quests.QuestCatalog
+import com.crochetquest.app.domain.quests.QuestItem
+import com.crochetquest.app.domain.quests.QuestRule
+import com.crochetquest.app.domain.quests.QuestStatus
+import com.crochetquest.app.domain.quests.periodFor
 
 data class SessionResult(
     val xpEarned: Int,
@@ -14,19 +27,49 @@ data class SessionResult(
     /** Set when the player typed a stitch they had already recorded (no reward). */
     val knownStitchName: String?,
     val levelBefore: Int,
-    val levelAfter: Int
+    val levelAfter: Int,
+    val checks: ChecksResult = ChecksResult.NONE
+) {
+    val leveledUp: Boolean get() = levelAfter > levelBefore
+}
+
+data class ProjectResult(
+    val projectId: Long,
+    val levelBefore: Int,
+    val levelAfter: Int,
+    val xpEarned: Int = 0,
+    val yarnEarned: Int = 0,
+    val completedNow: Boolean = false,
+    val rewardedUpdate: Boolean = false,
+    val checks: ChecksResult = ChecksResult.NONE
+) {
+    val leveledUp: Boolean get() = levelAfter > levelBefore
+}
+
+data class ClaimResult(
+    val questTitle: String,
+    val xpEarned: Int,
+    val yarnEarned: Int,
+    val levelBefore: Int,
+    val levelAfter: Int,
+    val checks: ChecksResult = ChecksResult.NONE
 ) {
     val leveledUp: Boolean get() = levelAfter > levelBefore
 }
 
 /**
- * Single source of truth for XP, yarn and level changes. UI code never touches reward math.
- * Every mutating operation runs inside one transaction.
+ * Single source of truth for XP, yarn, levels, projects, quests and achievements.
+ * UI code never touches reward math. Every mutating operation runs in one transaction, and
+ * ends by running the [ProgressEngine] so quests and achievements follow real events only.
  */
 class GameService(
     private val store: GameStore,
     private val clock: GameClock = SystemGameClock
 ) {
+    private val engine = ProgressEngine(store, clock)
+
+    // ------------------------------------------------------------------ profile
+
     /** Idempotent: if a profile already exists it is returned unchanged. */
     suspend fun createProfile(catName: String): PlayerProfile = store.inTransaction {
         store.getProfile() ?: run {
@@ -50,6 +93,10 @@ class GameService(
     }
 
     suspend fun rewardedSessionsToday(): Int = store.countRewardedSessionsOnDay(clock.todayKey())
+    suspend fun sessionTotal(): Int = store.countSessionsBetween(0L, Long.MAX_VALUE)
+    suspend fun stitchTotal(): Int = store.countStitches()
+
+    // ------------------------------------------------------------------ sessions
 
     /**
      * Logs a crochet session. Rules:
@@ -107,6 +154,7 @@ class GameService(
 
         val updated = profile.withReward(xp, yarn)
         if (updated != profile) store.updateProfile(updated)
+        val checks = engine.runChecks(updated)
 
         SessionResult(
             xpEarned = xp,
@@ -115,7 +163,8 @@ class GameService(
             newStitchName = rewardedStitch,
             knownStitchName = knownStitch,
             levelBefore = LevelCurve.levelForXp(profile.totalXp),
-            levelAfter = LevelCurve.levelForXp(updated.totalXp)
+            levelAfter = LevelCurve.levelForXp(updated.totalXp),
+            checks = checks
         )
     }
 
@@ -127,13 +176,288 @@ class GameService(
         true
     }
 
-    private fun cleanCatName(raw: String): String? =
-        raw.trim().replace(WHITESPACE, " ").take(RewardConfig.MAX_CAT_NAME_LENGTH).trim()
-            .ifEmpty { null }
+    // ------------------------------------------------------------------ projects
+
+    /**
+     * Creates a project, or edits the details of an existing one. Editing never changes status,
+     * progress or rewards. Returns null for a blank name, a missing profile or an unknown id.
+     */
+    suspend fun saveProject(draft: ProjectDraft): ProjectResult? = store.inTransaction {
+        val profile = store.getProfile() ?: return@inTransaction null
+        val name = cleanText(draft.name, RewardConfig.MAX_PROJECT_NAME_LENGTH) ?: return@inTransaction null
+        val now = clock.nowMillis()
+        val description = draft.description.limited(RewardConfig.MAX_PROJECT_NOTE_LENGTH)
+        val hook = draft.hookSize.limited(RewardConfig.MAX_HOOK_SIZE_LENGTH)
+        val materials = draft.materialNotes.limited(RewardConfig.MAX_PROJECT_NOTE_LENGTH)
+        val stitches = draft.stitchNotes.limited(RewardConfig.MAX_PROJECT_NOTE_LENGTH)
+
+        val projectId: Long
+        if (draft.id == null) {
+            // New projects start Planned or In progress; finishing always goes through completeProject.
+            val status = if (draft.status == ProjectStatus.PLANNED) ProjectStatus.PLANNED else ProjectStatus.IN_PROGRESS
+            projectId = store.insertProject(
+                Project(
+                    name = name,
+                    description = description,
+                    category = draft.category.name,
+                    status = status.name,
+                    progressPercent = 0,
+                    targetDateEpochDay = draft.targetDateEpochDay,
+                    hookSize = hook,
+                    materialNotes = materials,
+                    stitchNotes = stitches,
+                    createdAt = now,
+                    completedAt = null,
+                    completionRewardGranted = false,
+                    lastRewardedProgress = 0
+                )
+            )
+        } else {
+            val existing = store.getProject(draft.id) ?: return@inTransaction null
+            store.updateProject(
+                existing.copy(
+                    name = name,
+                    description = description,
+                    category = draft.category.name,
+                    targetDateEpochDay = draft.targetDateEpochDay,
+                    hookSize = hook,
+                    materialNotes = materials,
+                    stitchNotes = stitches
+                )
+            )
+            projectId = existing.id
+        }
+
+        val level = LevelCurve.levelForXp(profile.totalXp)
+        ProjectResult(projectId, level, level, checks = engine.runChecks(profile))
+    }
+
+    /** Moves a Planned project to In progress. No reward. */
+    suspend fun startProject(id: Long): Boolean = store.inTransaction {
+        val project = store.getProject(id) ?: return@inTransaction false
+        if (project.statusEnum != ProjectStatus.PLANNED) return@inTransaction false
+        store.updateProject(project.copy(status = ProjectStatus.IN_PROGRESS.name))
+        true
+    }
+
+    /**
+     * Sets progress (0-100). Rules:
+     *  - completed projects must be reopened first;
+     *  - moving a Planned project forward makes it In progress;
+     *  - forward moves are logged to the project history;
+     *  - a reward is given only when progress passes the best previously rewarded value by
+     *    MEANINGFUL_PROGRESS_STEP points. Moving back and forth never earns twice.
+     */
+    suspend fun setProjectProgress(id: Long, percent: Int): ProjectResult? = store.inTransaction {
+        val profile = store.getProfile() ?: return@inTransaction null
+        val project = store.getProject(id) ?: return@inTransaction null
+        if (project.statusEnum == ProjectStatus.COMPLETED) return@inTransaction null
+
+        val now = clock.nowMillis()
+        val newPercent = percent.coerceIn(0, 100)
+        val level = LevelCurve.levelForXp(profile.totalXp)
+        if (newPercent == project.progressPercent) {
+            return@inTransaction ProjectResult(id, level, level)
+        }
+
+        var updated = project.copy(progressPercent = newPercent)
+        if (updated.statusEnum == ProjectStatus.PLANNED && newPercent > 0) {
+            updated = updated.copy(status = ProjectStatus.IN_PROGRESS.name)
+        }
+
+        var rewarded = false
+        if (newPercent > project.progressPercent) {
+            rewarded = newPercent - project.lastRewardedProgress >= RewardConfig.MEANINGFUL_PROGRESS_STEP
+            if (rewarded) updated = updated.copy(lastRewardedProgress = newPercent)
+            store.insertProjectUpdate(
+                ProjectUpdate(
+                    projectId = id,
+                    loggedAt = now,
+                    fromPercent = project.progressPercent,
+                    toPercent = newPercent,
+                    rewarded = rewarded
+                )
+            )
+        }
+        store.updateProject(updated)
+
+        val reward = if (rewarded) RewardConfig.PROJECT_UPDATE else RewardConfig.Reward(0, 0)
+        val newProfile = profile.withReward(reward.xp, reward.yarn)
+        if (newProfile != profile) store.updateProfile(newProfile)
+        ProjectResult(
+            projectId = id,
+            levelBefore = level,
+            levelAfter = LevelCurve.levelForXp(newProfile.totalXp),
+            xpEarned = reward.xp,
+            yarnEarned = reward.yarn,
+            rewardedUpdate = rewarded,
+            checks = engine.runChecks(newProfile)
+        )
+    }
+
+    /**
+     * Marks a project finished. The completion reward is granted only if this project has never
+     * been rewarded before, so reopening and finishing again (or any edit) cannot pay twice.
+     * Returns null if the project is missing or already completed.
+     */
+    suspend fun completeProject(id: Long): ProjectResult? = store.inTransaction {
+        val profile = store.getProfile() ?: return@inTransaction null
+        val project = store.getProject(id) ?: return@inTransaction null
+        if (project.statusEnum == ProjectStatus.COMPLETED) return@inTransaction null
+
+        val now = clock.nowMillis()
+        var updated = project.copy(
+            status = ProjectStatus.COMPLETED.name,
+            progressPercent = 100,
+            completedAt = now,
+            lastRewardedProgress = 100
+        )
+        if (project.progressPercent < 100) {
+            store.insertProjectUpdate(
+                ProjectUpdate(
+                    projectId = id,
+                    loggedAt = now,
+                    fromPercent = project.progressPercent,
+                    toPercent = 100,
+                    rewarded = false
+                )
+            )
+        }
+
+        var xp = 0
+        var yarn = 0
+        if (!project.completionRewardGranted) {
+            xp = RewardConfig.PROJECT_COMPLETE.xp
+            yarn = RewardConfig.PROJECT_COMPLETE.yarn
+            updated = updated.copy(completionRewardGranted = true)
+        }
+        store.updateProject(updated)
+
+        val newProfile = profile.withReward(xp, yarn)
+        if (newProfile != profile) store.updateProfile(newProfile)
+        ProjectResult(
+            projectId = id,
+            levelBefore = LevelCurve.levelForXp(profile.totalXp),
+            levelAfter = LevelCurve.levelForXp(newProfile.totalXp),
+            xpEarned = xp,
+            yarnEarned = yarn,
+            completedNow = true,
+            checks = engine.runChecks(newProfile)
+        )
+    }
+
+    /** Reopens a finished project as In progress. Never grants or removes anything. */
+    suspend fun reopenProject(id: Long): Boolean = store.inTransaction {
+        val project = store.getProject(id) ?: return@inTransaction false
+        if (project.statusEnum != ProjectStatus.COMPLETED) return@inTransaction false
+        store.updateProject(
+            project.copy(status = ProjectStatus.IN_PROGRESS.name, completedAt = null)
+        )
+        true
+    }
+
+    suspend fun deleteProject(id: Long): Boolean = store.inTransaction {
+        if (store.getProject(id) == null) return@inTransaction false
+        store.deleteProject(id)
+        true
+    }
+
+    // ------------------------------------------------------------------ quests
+
+    /**
+     * The quest board. An unclaimed completion from an earlier period stays claimable (progress
+     * is never reset unexpectedly); otherwise the current period's state is shown.
+     */
+    suspend fun questBoard(): List<QuestItem> {
+        val now = clock.nowMillis()
+        val completions = store.allQuestCompletions()
+        return QuestCatalog.all.map { definition ->
+            val period = clock.periodFor(definition.repeat, now)
+            val target = definition.rule.target
+            val unclaimed = completions
+                .filter { it.questKey == definition.key && it.claimedAt == null }
+                .minByOrNull { it.completedAt }
+            val thisPeriod = completions.firstOrNull {
+                it.questKey == definition.key && it.periodKey == period.key
+            }
+            when {
+                unclaimed != null ->
+                    QuestItem(definition, QuestStatus.COMPLETED, target, target, unclaimed.periodKey)
+                thisPeriod != null ->
+                    QuestItem(definition, QuestStatus.CLAIMED, target, target, period.key)
+                else -> {
+                    val (current, _) = engine.questProgress(definition, period)
+                    val status = if (current > 0) QuestStatus.IN_PROGRESS else QuestStatus.AVAILABLE
+                    QuestItem(definition, status, current, target, period.key)
+                }
+            }
+        }
+    }
+
+    /**
+     * Claims the reward of a completed quest instance. It works exactly once: the claim flips
+     * claimedAt in a single guarded UPDATE, so double taps and repeated events cannot pay twice.
+     */
+    suspend fun claimQuest(questKey: String, periodKey: String): ClaimResult? = store.inTransaction {
+        val definition = QuestCatalog.find(questKey) ?: return@inTransaction null
+        val profile = store.getProfile() ?: return@inTransaction null
+        val completion = store.getQuestCompletion(questKey, periodKey) ?: return@inTransaction null
+        if (completion.claimedAt != null) return@inTransaction null
+        if (!store.markQuestClaimed(questKey, periodKey, clock.nowMillis())) return@inTransaction null
+
+        val updated = profile.withReward(definition.reward.xp, definition.reward.yarn)
+        store.updateProfile(updated)
+        ClaimResult(
+            questTitle = definition.title,
+            xpEarned = definition.reward.xp,
+            yarnEarned = definition.reward.yarn,
+            levelBefore = LevelCurve.levelForXp(profile.totalXp),
+            levelAfter = LevelCurve.levelForXp(updated.totalXp),
+            checks = engine.runChecks(updated)
+        )
+    }
+
+    /**
+     * For self-reported quests ("I did this"). Marks the current instance completed (not yet
+     * claimed). Returns null if the quest is not a manual one or is already done this period.
+     */
+    suspend fun markManualQuestDone(questKey: String): ChecksResult? = store.inTransaction {
+        val definition = QuestCatalog.find(questKey) ?: return@inTransaction null
+        if (definition.rule != QuestRule.Manual) return@inTransaction null
+        val profile = store.getProfile() ?: return@inTransaction null
+        val now = clock.nowMillis()
+        val period = clock.periodFor(definition.repeat, now)
+        val inserted = store.insertQuestCompletionIfAbsent(
+            QuestCompletion(
+                questKey = definition.key,
+                periodKey = period.key,
+                completedAt = now,
+                claimedAt = null,
+                associatedProjectId = null
+            )
+        )
+        if (!inserted) return@inTransaction null
+        engine.runChecks(profile)
+    }
+
+    // ------------------------------------------------------------------ achievements
+
+    suspend fun achievements(): List<AchievementItem> {
+        val unlocked = store.allAchievementUnlocks().associateBy { it.achievementKey }
+        return AchievementCatalog.all.map { AchievementItem(it, unlocked[it.key]?.unlockedAt) }
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    private fun cleanCatName(raw: String): String? = cleanText(raw, RewardConfig.MAX_CAT_NAME_LENGTH)
 
     private fun cleanStitchName(raw: String?): String? =
-        raw?.trim()?.replace(WHITESPACE, " ")?.take(RewardConfig.MAX_STITCH_NAME_LENGTH)?.trim()
-            ?.ifEmpty { null }
+        raw?.let { cleanText(it, RewardConfig.MAX_STITCH_NAME_LENGTH) }
+
+    private fun cleanText(raw: String, maxLength: Int): String? =
+        raw.trim().replace(WHITESPACE, " ").take(maxLength).trim().ifEmpty { null }
+
+    private fun String.limited(maxLength: Int): String = trim().take(maxLength)
 
     private companion object {
         val WHITESPACE = Regex("\\s+")

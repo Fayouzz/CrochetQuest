@@ -8,13 +8,24 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.crochetquest.app.CrochetQuestApp
 import com.crochetquest.app.data.local.PlayerProfile
+import com.crochetquest.app.data.local.Project
+import com.crochetquest.app.data.local.ProjectUpdate
 import com.crochetquest.app.data.repository.GameRepository
 import com.crochetquest.app.data.repository.SettingsRepository
+import com.crochetquest.app.domain.achievements.AchievementItem
+import com.crochetquest.app.domain.game.ChecksResult
+import com.crochetquest.app.domain.game.ClaimResult
 import com.crochetquest.app.domain.game.GameService
 import com.crochetquest.app.domain.game.LevelCurve
 import com.crochetquest.app.domain.game.LevelInfo
+import com.crochetquest.app.domain.game.ProjectResult
 import com.crochetquest.app.domain.game.RewardConfig
 import com.crochetquest.app.domain.game.SessionResult
+import com.crochetquest.app.domain.projects.ProjectDraft
+import com.crochetquest.app.domain.projects.ProjectStatus
+import com.crochetquest.app.domain.projects.statusEnum
+import com.crochetquest.app.domain.quests.QuestItem
+import com.crochetquest.app.domain.quests.pickFeaturedQuest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -36,22 +47,39 @@ sealed interface GameUiState {
         val stitchesRecorded: Int,
         val rewardedSessionsToday: Int,
         val maxRewardedSessionsPerDay: Int,
-        val animationsEnabled: Boolean
-    ) : GameUiState
+        val animationsEnabled: Boolean,
+        val projects: List<Project>,
+        val questBoard: List<QuestItem>,
+        val achievements: List<AchievementItem>
+    ) : GameUiState {
+        val ongoingProjects: List<Project> get() = projects.filter { it.statusEnum != ProjectStatus.COMPLETED }
+        val featuredQuest: QuestItem? get() = pickFeaturedQuest(questBoard)
+    }
 }
 
 class GameViewModel(
-    repository: GameRepository,
+    private val repository: GameRepository,
     private val service: GameService,
     private val settings: SettingsRepository
 ) : ViewModel() {
 
-    val uiState: StateFlow<GameUiState> = combine<PlayerProfile?, Int, Int, Boolean, GameUiState>(
+    /** Emits whenever any stored game data changes, so derived state is rebuilt. */
+    private val dataChanged: Flow<Unit> = combine(
+        listOf<Flow<Any?>>(
+            repository.sessionCount,
+            repository.stitchCount,
+            repository.projectUpdateCount,
+            repository.questCompletions,
+            repository.achievementUnlocks
+        )
+    ) { }
+
+    val uiState: StateFlow<GameUiState> = combine<PlayerProfile?, List<Project>, Boolean, Unit, GameUiState>(
         repository.profile,
-        repository.sessionCount,
-        repository.stitchCount,
-        settings.animationsEnabled
-    ) { profile, sessions, stitches, animations ->
+        repository.projects,
+        settings.animationsEnabled,
+        dataChanged
+    ) { profile, projects, animations, _ ->
         if (profile == null) {
             GameUiState.NeedsOnboarding
         } else {
@@ -59,11 +87,14 @@ class GameViewModel(
                 catName = profile.catName,
                 levelInfo = LevelCurve.infoFor(profile.totalXp),
                 yarnBalance = profile.yarnBalance,
-                sessionsLogged = sessions,
-                stitchesRecorded = stitches,
+                sessionsLogged = service.sessionTotal(),
+                stitchesRecorded = service.stitchTotal(),
                 rewardedSessionsToday = service.rewardedSessionsToday(),
                 maxRewardedSessionsPerDay = RewardConfig.MAX_REWARDED_SESSIONS_PER_DAY,
-                animationsEnabled = animations
+                animationsEnabled = animations,
+                projects = projects,
+                questBoard = service.questBoard(),
+                achievements = service.achievements()
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GameUiState.Loading)
@@ -73,6 +104,11 @@ class GameViewModel(
 
     /** Guards against double taps: only one game action runs at a time. */
     private var busy = false
+
+    fun observeProjectUpdates(projectId: Long): Flow<List<ProjectUpdate>> =
+        repository.observeProjectUpdates(projectId)
+
+    // ---- profile and sessions ----
 
     fun completeOnboarding(catName: String) = runExclusive {
         service.createProfile(catName)
@@ -94,6 +130,62 @@ class GameViewModel(
         viewModelScope.launch { settings.setAnimationsEnabled(enabled) }
     }
 
+    // ---- projects ----
+
+    fun saveProject(draft: ProjectDraft, onSaved: () -> Unit) = runExclusive {
+        val result = service.saveProject(draft)
+        if (result == null) {
+            messageChannel.send("Please give your project a name.")
+        } else {
+            val note = result.checks.suffix()
+            messageChannel.send(
+                (if (draft.id == null) "Project added." else "Project saved.") + note
+            )
+            onSaved()
+        }
+    }
+
+    fun startProject(id: Long) = runExclusive {
+        if (service.startProject(id)) messageChannel.send("Project started. Happy stitching!")
+    }
+
+    fun setProjectProgress(id: Long, percent: Int) = runExclusive {
+        val result = service.setProjectProgress(id, percent)
+        if (result != null) messageChannel.send(result.toProgressMessage())
+    }
+
+    fun completeProject(id: Long) = runExclusive {
+        val result = service.completeProject(id)
+        if (result != null) messageChannel.send(result.toCompletionMessage())
+    }
+
+    fun reopenProject(id: Long) = runExclusive {
+        if (service.reopenProject(id)) {
+            messageChannel.send("Project reopened. Rewards are only paid once per project.")
+        }
+    }
+
+    fun deleteProject(id: Long, onDeleted: () -> Unit) = runExclusive {
+        if (service.deleteProject(id)) {
+            messageChannel.send("Project deleted.")
+            onDeleted()
+        }
+    }
+
+    // ---- quests ----
+
+    fun claimQuest(questKey: String, periodKey: String) = runExclusive {
+        val result = service.claimQuest(questKey, periodKey)
+        if (result != null) messageChannel.send(result.toMessage())
+    }
+
+    fun markQuestDone(questKey: String) = runExclusive {
+        val checks = service.markManualQuestDone(questKey)
+        if (checks != null) {
+            messageChannel.send("Lovely! Your reward is ready to claim." + checks.suffix())
+        }
+    }
+
     private fun runExclusive(block: suspend () -> Unit) {
         if (busy) return
         busy = true
@@ -111,6 +203,20 @@ class GameViewModel(
     }
 }
 
+// ---------------------------------------------------------------- message text
+
+private fun yarnWord(count: Int) = if (count == 1) "ball" else "balls"
+
+private fun rewardText(xp: Int, yarn: Int) = " +$xp XP, +$yarn yarn ${yarnWord(yarn)}."
+
+private fun levelUpText(leveledUp: Boolean, level: Int) =
+    if (leveledUp) " Level up! Level $level · ${LevelCurve.titleForLevel(level)}" else ""
+
+private fun ChecksResult.suffix(): String = buildString {
+    completedQuestTitles.forEach { append(" Quest ready to claim: $it.") }
+    unlockedAchievementNames.forEach { append(" Achievement unlocked: $it!") }
+}
+
 internal fun SessionResult.toMessage(): String = buildString {
     append(
         if (sessionRewarded) "Lovely stitching!"
@@ -120,12 +226,35 @@ internal fun SessionResult.toMessage(): String = buildString {
         newStitchName != null -> append(" New stitch discovered: $newStitchName.")
         knownStitchName != null -> append(" You've already recorded $knownStitchName.")
     }
+    if (xpEarned > 0 || yarnEarned > 0) append(rewardText(xpEarned, yarnEarned))
+    append(levelUpText(leveledUp, levelAfter))
+    append(checks.suffix())
+}
+
+private fun ProjectResult.toProgressMessage(): String = buildString {
+    if (rewardedUpdate) {
+        append("Nice progress!").append(rewardText(xpEarned, yarnEarned))
+    } else {
+        append("Progress saved.")
+    }
+    append(levelUpText(leveledUp, levelAfter))
+    append(checks.suffix())
+}
+
+private fun ProjectResult.toCompletionMessage(): String = buildString {
     if (xpEarned > 0 || yarnEarned > 0) {
-        append(" +$xpEarned XP, +$yarnEarned yarn ${if (yarnEarned == 1) "ball" else "balls"}.")
+        append("Project finished! What a lovely make.").append(rewardText(xpEarned, yarnEarned))
+    } else {
+        append("Project finished again! The completion reward is only paid once per project.")
     }
-    if (leveledUp) {
-        append(" Level up! Level $levelAfter · ${LevelCurve.titleForLevel(levelAfter)}")
-    }
+    append(levelUpText(leveledUp, levelAfter))
+    append(checks.suffix())
+}
+
+internal fun ClaimResult.toMessage(): String = buildString {
+    append("Quest claimed: $questTitle.").append(rewardText(xpEarned, yarnEarned))
+    append(levelUpText(leveledUp, levelAfter))
+    append(checks.suffix())
 }
 
 val GameViewModelFactory: ViewModelProvider.Factory = viewModelFactory {

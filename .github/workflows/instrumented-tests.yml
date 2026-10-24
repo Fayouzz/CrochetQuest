@@ -1,7 +1,7 @@
 name: Instrumented tests
 
 # Manual only: these tests boot an Android emulator, which is slow, so they never block the
-# normal APK build. Start them from the Actions tab: Instrumented tests, Run workflow.
+# normal APK build. Start them from the Actions tab: Instrumented tests, Run workflow..
 on:
   workflow_dispatch:
 

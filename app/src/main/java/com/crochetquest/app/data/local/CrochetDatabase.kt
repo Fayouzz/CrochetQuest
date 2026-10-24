@@ -15,9 +15,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Project::class,
         ProjectUpdate::class,
         QuestCompletion::class,
-        AchievementUnlock::class
+        AchievementUnlock::class,
+        InventoryItem::class,
+        EquippedCosmetic::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class CrochetDatabase : RoomDatabase() {
@@ -28,6 +30,9 @@ abstract class CrochetDatabase : RoomDatabase() {
     abstract fun projectUpdateDao(): ProjectUpdateDao
     abstract fun questDao(): QuestDao
     abstract fun achievementDao(): AchievementDao
+    abstract fun inventoryDao(): InventoryDao
+    abstract fun equippedDao(): EquippedDao
+    abstract fun resetDao(): ResetDao
 
     companion object {
         /** Stage 1 -> Stage 2: purely additive, so existing progress is kept. */
@@ -94,11 +99,33 @@ abstract class CrochetDatabase : RoomDatabase() {
             }
         }
 
+        /** Stage 2 -> Stage 3: adds the wardrobe tables. Purely additive. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `inventory_item` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`itemKey` TEXT NOT NULL, " +
+                        "`purchasedAt` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_inventory_item_itemKey` " +
+                        "ON `inventory_item` (`itemKey`)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `equipped_cosmetic` (" +
+                        "`accessorySlot` TEXT NOT NULL, " +
+                        "`itemKey` TEXT NOT NULL, " +
+                        "PRIMARY KEY(`accessorySlot`))"
+                )
+            }
+        }
+
         fun create(context: Context): CrochetDatabase =
             Room.databaseBuilder(
                 context.applicationContext,
                 CrochetDatabase::class.java,
                 "crochet_quest.db"
-            ).addMigrations(MIGRATION_1_2).build()
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
     }
 }

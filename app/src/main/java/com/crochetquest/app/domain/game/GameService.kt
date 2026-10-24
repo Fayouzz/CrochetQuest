@@ -1,6 +1,7 @@
 package com.crochetquest.app.domain.game
 
 import com.crochetquest.app.data.local.CrochetSession
+import com.crochetquest.app.data.local.InventoryItem
 import com.crochetquest.app.data.local.PlayerProfile
 import com.crochetquest.app.data.local.Project
 import com.crochetquest.app.data.local.ProjectUpdate
@@ -8,6 +9,10 @@ import com.crochetquest.app.data.local.QuestCompletion
 import com.crochetquest.app.data.local.StitchRecord
 import com.crochetquest.app.domain.achievements.AchievementCatalog
 import com.crochetquest.app.domain.achievements.AchievementItem
+import com.crochetquest.app.domain.cosmetics.AccessorySlot
+import com.crochetquest.app.domain.cosmetics.CosmeticCatalog
+import com.crochetquest.app.domain.cosmetics.PurchaseResult
+import com.crochetquest.app.domain.cosmetics.WardrobeItem
 import com.crochetquest.app.domain.projects.ProjectDraft
 import com.crochetquest.app.domain.projects.ProjectStatus
 import com.crochetquest.app.domain.projects.statusEnum
@@ -446,6 +451,60 @@ class GameService(
         val unlocked = store.allAchievementUnlocks().associateBy { it.achievementKey }
         return AchievementCatalog.all.map { AchievementItem(it, unlocked[it.key]?.unlockedAt) }
     }
+
+    // ------------------------------------------------------------------ wardrobe
+
+    /**
+     * Buys a cosmetic. Order matters (there is no rollback in tests, and none is needed):
+     * every check happens before anything is written, and the unique inventory index is the
+     * final guard, so a second purchase of the same item can never charge twice.
+     */
+    suspend fun purchaseItem(itemKey: String): PurchaseResult = store.inTransaction {
+        val item = CosmeticCatalog.find(itemKey) ?: return@inTransaction PurchaseResult.UNKNOWN_ITEM
+        val profile = store.getProfile() ?: return@inTransaction PurchaseResult.NO_PROFILE
+        if (store.allInventory().any { it.itemKey == itemKey }) {
+            return@inTransaction PurchaseResult.ALREADY_OWNED
+        }
+        val updated = profile.trySpendYarn(item.cost)
+            ?: return@inTransaction PurchaseResult.NOT_ENOUGH_YARN
+        val inserted = store.insertInventoryItemIfAbsent(
+            InventoryItem(itemKey = itemKey, purchasedAt = clock.nowMillis())
+        )
+        if (!inserted) return@inTransaction PurchaseResult.ALREADY_OWNED
+        store.updateProfile(updated)
+        PurchaseResult.SUCCESS
+    }
+
+    /** Wears an owned item, replacing whatever the cat wore in that slot. Free to repeat. */
+    suspend fun equipItem(itemKey: String): Boolean = store.inTransaction {
+        val item = CosmeticCatalog.find(itemKey) ?: return@inTransaction false
+        if (store.allInventory().none { it.itemKey == itemKey }) return@inTransaction false
+        store.setEquipped(item.slot.name, item.key)
+        true
+    }
+
+    suspend fun unequipSlot(slot: AccessorySlot): Boolean = store.inTransaction {
+        if (store.allEquipped().none { it.accessorySlot == slot.name }) return@inTransaction false
+        store.clearEquipped(slot.name)
+        true
+    }
+
+    /** Back to the default appearance. Owned items stay owned. */
+    suspend fun unequipAll() = store.inTransaction { store.clearAllEquipped() }
+
+    suspend fun wardrobe(): List<WardrobeItem> {
+        val owned = store.allInventory().map { it.itemKey }.toSet()
+        val worn = store.allEquipped().map { it.itemKey }.toSet()
+        return CosmeticCatalog.all.map { item ->
+            val isOwned = item.key in owned
+            WardrobeItem(item, owned = isOwned, equipped = isOwned && item.key in worn)
+        }
+    }
+
+    // ------------------------------------------------------------------ reset
+
+    /** Deletes everything (after the UI has asked for explicit confirmation). */
+    suspend fun resetProgress() = store.inTransaction { store.resetAllData() }
 
     // ------------------------------------------------------------------ helpers
 

@@ -4,6 +4,8 @@ import androidx.room.withTransaction
 import com.crochetquest.app.data.local.AchievementUnlock
 import com.crochetquest.app.data.local.CrochetDatabase
 import com.crochetquest.app.data.local.CrochetSession
+import com.crochetquest.app.data.local.EquippedCosmetic
+import com.crochetquest.app.data.local.InventoryItem
 import com.crochetquest.app.data.local.PlayerProfile
 import com.crochetquest.app.data.local.Project
 import com.crochetquest.app.data.local.ProjectUpdate
@@ -21,6 +23,9 @@ class GameRepository(private val db: CrochetDatabase) : GameStore {
     private val projectUpdateDao = db.projectUpdateDao()
     private val questDao = db.questDao()
     private val achievementDao = db.achievementDao()
+    private val inventoryDao = db.inventoryDao()
+    private val equippedDao = db.equippedDao()
+    private val resetDao = db.resetDao()
 
     // ---- observable state for the UI ----
     val profile: Flow<PlayerProfile?> = profileDao.observe()
@@ -30,6 +35,8 @@ class GameRepository(private val db: CrochetDatabase) : GameStore {
     val projectUpdateCount: Flow<Int> = projectUpdateDao.observeTotal()
     val questCompletions: Flow<List<QuestCompletion>> = questDao.observeAll()
     val achievementUnlocks: Flow<List<AchievementUnlock>> = achievementDao.observeAll()
+    val inventory: Flow<List<InventoryItem>> = inventoryDao.observeAll()
+    val equipped: Flow<List<EquippedCosmetic>> = equippedDao.observeAll()
 
     fun observeProjectUpdates(projectId: Long): Flow<List<ProjectUpdate>> =
         projectUpdateDao.observeForProject(projectId)
@@ -102,4 +109,29 @@ class GameRepository(private val db: CrochetDatabase) : GameStore {
 
     override suspend fun insertAchievementIfAbsent(unlock: AchievementUnlock): Boolean =
         achievementDao.insertIfAbsent(unlock) != -1L
+
+    override suspend fun allInventory(): List<InventoryItem> = inventoryDao.getAll()
+
+    override suspend fun insertInventoryItemIfAbsent(item: InventoryItem): Boolean =
+        inventoryDao.insertIfAbsent(item) != -1L
+
+    override suspend fun allEquipped(): List<EquippedCosmetic> = equippedDao.getAll()
+
+    override suspend fun setEquipped(slot: String, itemKey: String) =
+        equippedDao.set(EquippedCosmetic(slot, itemKey))
+
+    override suspend fun clearEquipped(slot: String) = equippedDao.clear(slot)
+    override suspend fun clearAllEquipped() = equippedDao.clearAll()
+
+    override suspend fun resetAllData() {
+        resetDao.clearEquipped()
+        resetDao.clearInventory()
+        resetDao.clearAchievements()
+        resetDao.clearQuestCompletions()
+        resetDao.clearProjectUpdates()
+        resetDao.clearProjects()
+        resetDao.clearStitches()
+        resetDao.clearSessions()
+        resetDao.clearProfile()
+    }
 }

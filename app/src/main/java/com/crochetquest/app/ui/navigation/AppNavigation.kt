@@ -21,6 +21,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -39,6 +41,10 @@ import com.crochetquest.app.data.local.ProjectUpdate
 import com.crochetquest.app.ui.GameUiState
 import com.crochetquest.app.ui.GameViewModel
 import com.crochetquest.app.ui.GameViewModelFactory
+import com.crochetquest.app.ui.LevelUpEvent
+import com.crochetquest.app.ui.components.LevelUpCelebration
+import com.crochetquest.app.ui.screens.wardrobe.WardrobeScreen
+import com.crochetquest.app.ui.util.rememberAnimationsAllowed
 import com.crochetquest.app.ui.screens.collection.CollectionScreen
 import com.crochetquest.app.ui.screens.home.HomeScreen
 import com.crochetquest.app.ui.screens.onboarding.OnboardingScreen
@@ -49,6 +55,7 @@ import com.crochetquest.app.ui.screens.quests.QuestsScreen
 import com.crochetquest.app.ui.screens.settings.SettingsScreen
 
 private const val SETTINGS_ROUTE = "settings"
+private const val WARDROBE_ROUTE = "wardrobe"
 private const val PROJECT_DETAIL_ROUTE = "project/{id}"
 private const val PROJECT_EDIT_ROUTE = "project_edit/{id}"
 private const val ID_ARG = "id"
@@ -74,17 +81,31 @@ fun CrochetQuestRoot(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    var celebration by remember { mutableStateOf<LevelUpEvent?>(null) }
+
     LaunchedEffect(viewModel) {
         viewModel.messages.collect { message ->
             snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Long)
         }
+    }
+    LaunchedEffect(viewModel) {
+        viewModel.levelUps.collect { celebration = it }
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (val s = state) {
             GameUiState.Loading -> Box(Modifier.fillMaxSize())
             GameUiState.NeedsOnboarding -> OnboardingScreen(onStart = viewModel::completeOnboarding)
-            is GameUiState.Ready -> MainScaffold(s, viewModel, snackbarHostState)
+            is GameUiState.Ready -> Box(Modifier.fillMaxSize()) {
+                MainScaffold(s, viewModel, snackbarHostState)
+                celebration?.let { event ->
+                    LevelUpCelebration(
+                        event = event,
+                        animate = rememberAnimationsAllowed(s.animationsEnabled),
+                        onDismiss = { celebration = null }
+                    )
+                }
+            }
         }
     }
 }
@@ -140,7 +161,8 @@ private fun MainScaffold(
                     onOpenProjects = { navController.navigateTopLevel(TopLevelDestination.PROJECTS.route) },
                     onAddProject = { navController.navigate(projectEditRoute(0)) },
                     onOpenProject = { navController.navigate(projectDetailRoute(it)) },
-                    onClaimQuest = viewModel::claimQuest
+                    onClaimQuest = viewModel::claimQuest,
+                    onOpenWardrobe = { navController.navigate(WARDROBE_ROUTE) }
                 )
             }
             composable(TopLevelDestination.QUESTS.route) {
@@ -158,14 +180,30 @@ private fun MainScaffold(
                 )
             }
             composable(TopLevelDestination.COLLECTION.route) {
-                CollectionScreen(achievements = state.achievements)
+                CollectionScreen(
+                    achievements = state.achievements,
+                    wardrobe = state.wardrobe,
+                    catName = state.catName,
+                    onOpenWardrobe = { navController.navigate(WARDROBE_ROUTE) }
+                )
             }
             composable(SETTINGS_ROUTE) {
                 SettingsScreen(
                     state = state,
                     onBack = { navController.popBackStack() },
                     onRenameCat = viewModel::renameCat,
-                    onAnimationsChange = viewModel::setAnimationsEnabled
+                    onAnimationsChange = viewModel::setAnimationsEnabled,
+                    onResetProgress = viewModel::resetProgress
+                )
+            }
+            composable(WARDROBE_ROUTE) {
+                WardrobeScreen(
+                    state = state,
+                    onBack = { navController.popBackStack() },
+                    onBuy = viewModel::purchase,
+                    onEquip = viewModel::equip,
+                    onUnequip = viewModel::unequip,
+                    onUnequipAll = viewModel::unequipAll
                 )
             }
             composable(

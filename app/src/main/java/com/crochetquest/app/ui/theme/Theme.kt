@@ -7,8 +7,14 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.crochetquest.app.R
 
 object CozyPalette {
     val Cream = Color(0xFFFFF8EF)
@@ -54,13 +60,45 @@ private val CozyColorScheme = lightColorScheme(
     outlineVariant = CozyPalette.PalePink
 )
 
+/**
+ * Nunito (SIL Open Font License, see /licenses) is a friendly rounded font. It is bundled as one
+ * variable font file, so each weight is the same file with a different weight setting.
+ */
+@OptIn(ExperimentalTextApi::class)
+private fun nunito(weight: FontWeight): Font = Font(
+    resId = R.font.nunito,
+    weight = weight,
+    variationSettings = FontVariation.Settings(FontVariation.weight(weight.weight))
+)
+
+@OptIn(ExperimentalTextApi::class)
+private val Nunito = FontFamily(
+    nunito(FontWeight.Normal),
+    nunito(FontWeight.Medium),
+    nunito(FontWeight.SemiBold),
+    nunito(FontWeight.Bold)
+)
+
+private fun TextStyle.rounded(weight: FontWeight? = null): TextStyle =
+    copy(fontFamily = Nunito, fontWeight = weight ?: fontWeight)
+
 private val baseTypography = Typography()
-private val CozyTypography = baseTypography.copy(
-    headlineLarge = baseTypography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-    headlineMedium = baseTypography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-    headlineSmall = baseTypography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
-    titleLarge = baseTypography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-    titleMedium = baseTypography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+private val CozyTypography = Typography(
+    displayLarge = baseTypography.displayLarge.rounded(),
+    displayMedium = baseTypography.displayMedium.rounded(),
+    displaySmall = baseTypography.displaySmall.rounded(),
+    headlineLarge = baseTypography.headlineLarge.rounded(FontWeight.Bold),
+    headlineMedium = baseTypography.headlineMedium.rounded(FontWeight.Bold),
+    headlineSmall = baseTypography.headlineSmall.rounded(FontWeight.SemiBold),
+    titleLarge = baseTypography.titleLarge.rounded(FontWeight.SemiBold),
+    titleMedium = baseTypography.titleMedium.rounded(FontWeight.SemiBold),
+    titleSmall = baseTypography.titleSmall.rounded(),
+    bodyLarge = baseTypography.bodyLarge.rounded(),
+    bodyMedium = baseTypography.bodyMedium.rounded(),
+    bodySmall = baseTypography.bodySmall.rounded(),
+    labelLarge = baseTypography.labelLarge.rounded(),
+    labelMedium = baseTypography.labelMedium.rounded(),
+    labelSmall = baseTypography.labelSmall.rounded()
 )
 
 private val CozyShapes = Shapes(

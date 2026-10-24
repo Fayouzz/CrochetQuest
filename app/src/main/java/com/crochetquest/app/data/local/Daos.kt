@@ -138,3 +138,65 @@ interface AchievementDao {
     @Query("SELECT * FROM achievement")
     fun observeAll(): Flow<List<AchievementUnlock>>
 }
+
+@Dao
+interface InventoryDao {
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(item: InventoryItem): Long
+
+    @Query("SELECT * FROM inventory_item")
+    suspend fun getAll(): List<InventoryItem>
+
+    @Query("SELECT * FROM inventory_item")
+    fun observeAll(): Flow<List<InventoryItem>>
+}
+
+@Dao
+interface EquippedDao {
+    /** Upsert: wearing something in a slot replaces whatever was there. */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun set(equipped: EquippedCosmetic)
+
+    @Query("DELETE FROM equipped_cosmetic WHERE accessorySlot = :slot")
+    suspend fun clear(slot: String)
+
+    @Query("DELETE FROM equipped_cosmetic")
+    suspend fun clearAll()
+
+    @Query("SELECT * FROM equipped_cosmetic")
+    suspend fun getAll(): List<EquippedCosmetic>
+
+    @Query("SELECT * FROM equipped_cosmetic")
+    fun observeAll(): Flow<List<EquippedCosmetic>>
+}
+
+/** Used only by "Reset game progress". Always called inside one transaction. */
+@Dao
+interface ResetDao {
+    @Query("DELETE FROM player_profile")
+    suspend fun clearProfile()
+
+    @Query("DELETE FROM crochet_session")
+    suspend fun clearSessions()
+
+    @Query("DELETE FROM stitch_record")
+    suspend fun clearStitches()
+
+    @Query("DELETE FROM project")
+    suspend fun clearProjects()
+
+    @Query("DELETE FROM project_update")
+    suspend fun clearProjectUpdates()
+
+    @Query("DELETE FROM quest_completion")
+    suspend fun clearQuestCompletions()
+
+    @Query("DELETE FROM achievement")
+    suspend fun clearAchievements()
+
+    @Query("DELETE FROM inventory_item")
+    suspend fun clearInventory()
+
+    @Query("DELETE FROM equipped_cosmetic")
+    suspend fun clearEquipped()
+}

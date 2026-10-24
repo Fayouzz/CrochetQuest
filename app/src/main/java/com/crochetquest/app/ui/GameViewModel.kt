@@ -13,6 +13,10 @@ import com.crochetquest.app.data.local.ProjectUpdate
 import com.crochetquest.app.data.repository.GameRepository
 import com.crochetquest.app.data.repository.SettingsRepository
 import com.crochetquest.app.domain.achievements.AchievementItem
+import com.crochetquest.app.domain.cosmetics.AccessorySlot
+import com.crochetquest.app.domain.cosmetics.CosmeticCatalog
+import com.crochetquest.app.domain.cosmetics.PurchaseResult
+import com.crochetquest.app.domain.cosmetics.WardrobeItem
 import com.crochetquest.app.domain.game.ChecksResult
 import com.crochetquest.app.domain.game.ClaimResult
 import com.crochetquest.app.domain.game.GameService
@@ -50,12 +54,18 @@ sealed interface GameUiState {
         val animationsEnabled: Boolean,
         val projects: List<Project>,
         val questBoard: List<QuestItem>,
-        val achievements: List<AchievementItem>
+        val achievements: List<AchievementItem>,
+        val wardrobe: List<WardrobeItem>
     ) : GameUiState {
         val ongoingProjects: List<Project> get() = projects.filter { it.statusEnum != ProjectStatus.COMPLETED }
         val featuredQuest: QuestItem? get() = pickFeaturedQuest(questBoard)
+        /** Keys of the accessories the cat is wearing right now. */
+        val equippedKeys: List<String> get() = wardrobe.filter { it.equipped }.map { it.item.key }
     }
 }
+
+/** Fired when XP crosses a level threshold; drives the short celebration. */
+data class LevelUpEvent(val level: Int, val title: String)
 
 class GameViewModel(
     private val repository: GameRepository,
@@ -70,7 +80,9 @@ class GameViewModel(
             repository.stitchCount,
             repository.projectUpdateCount,
             repository.questCompletions,
-            repository.achievementUnlocks
+            repository.achievementUnlocks,
+            repository.inventory,
+            repository.equipped
         )
     ) { }
 
@@ -94,13 +106,21 @@ class GameViewModel(
                 animationsEnabled = animations,
                 projects = projects,
                 questBoard = service.questBoard(),
-                achievements = service.achievements()
+                achievements = service.achievements(),
+                wardrobe = service.wardrobe()
             )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GameUiState.Loading)
 
     private val messageChannel = Channel<String>(Channel.BUFFERED)
     val messages: Flow<String> = messageChannel.receiveAsFlow()
+
+    private val levelUpChannel = Channel<LevelUpEvent>(Channel.BUFFERED)
+    val levelUps: Flow<LevelUpEvent> = levelUpChannel.receiveAsFlow()
+
+    private fun announceLevel(leveledUp: Boolean, level: Int) {
+        if (leveledUp) levelUpChannel.trySend(LevelUpEvent(level, LevelCurve.titleForLevel(level)))
+    }
 
     /** Guards against double taps: only one game action runs at a time. */
     private var busy = false
@@ -116,7 +136,10 @@ class GameViewModel(
 
     fun logSession(durationMinutes: Int?, newStitchName: String?) = runExclusive {
         val result = service.logSession(durationMinutes, newStitchName)
-        if (result != null) messageChannel.send(result.toMessage())
+        if (result != null) {
+            announceLevel(result.leveledUp, result.levelAfter)
+            messageChannel.send(result.toMessage())
+        }
     }
 
     fun renameCat(newName: String) = runExclusive {
@@ -151,12 +174,18 @@ class GameViewModel(
 
     fun setProjectProgress(id: Long, percent: Int) = runExclusive {
         val result = service.setProjectProgress(id, percent)
-        if (result != null) messageChannel.send(result.toProgressMessage())
+        if (result != null) {
+            announceLevel(result.leveledUp, result.levelAfter)
+            messageChannel.send(result.toProgressMessage())
+        }
     }
 
     fun completeProject(id: Long) = runExclusive {
         val result = service.completeProject(id)
-        if (result != null) messageChannel.send(result.toCompletionMessage())
+        if (result != null) {
+            announceLevel(result.leveledUp, result.levelAfter)
+            messageChannel.send(result.toCompletionMessage())
+        }
     }
 
     fun reopenProject(id: Long) = runExclusive {
@@ -176,7 +205,10 @@ class GameViewModel(
 
     fun claimQuest(questKey: String, periodKey: String) = runExclusive {
         val result = service.claimQuest(questKey, periodKey)
-        if (result != null) messageChannel.send(result.toMessage())
+        if (result != null) {
+            announceLevel(result.leveledUp, result.levelAfter)
+            messageChannel.send(result.toMessage())
+        }
     }
 
     fun markQuestDone(questKey: String) = runExclusive {
@@ -184,6 +216,40 @@ class GameViewModel(
         if (checks != null) {
             messageChannel.send("Lovely! Your reward is ready to claim." + checks.suffix())
         }
+    }
+
+    // ---- wardrobe ----
+
+    fun purchase(itemKey: String) = runExclusive {
+        val name = CosmeticCatalog.find(itemKey)?.name ?: "item"
+        messageChannel.send(
+            when (service.purchaseItem(itemKey)) {
+                PurchaseResult.SUCCESS -> "You bought the $name! Tap Equip to put it on."
+                PurchaseResult.NOT_ENOUGH_YARN -> "Not enough yarn balls yet. Keep crocheting!"
+                PurchaseResult.ALREADY_OWNED -> "You already own the $name."
+                PurchaseResult.UNKNOWN_ITEM, PurchaseResult.NO_PROFILE -> "That item isn't available."
+            }
+        )
+    }
+
+    fun equip(itemKey: String) = runExclusive {
+        if (service.equipItem(itemKey)) {
+            messageChannel.send("Looking good!")
+        }
+    }
+
+    fun unequip(slot: AccessorySlot) = runExclusive { service.unequipSlot(slot) }
+
+    fun unequipAll() = runExclusive {
+        service.unequipAll()
+        messageChannel.send("Back to the classic look.")
+    }
+
+    // ---- reset ----
+
+    /** The UI asks for explicit confirmation first. Afterwards the app returns to onboarding. */
+    fun resetProgress() = runExclusive {
+        service.resetProgress()
     }
 
     private fun runExclusive(block: suspend () -> Unit) {

@@ -1,25 +1,14 @@
 package com.crochetquest.app.ui.components
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import com.crochetquest.app.domain.quests.IconKey
 import com.crochetquest.app.ui.theme.CozyPalette
 import kotlin.math.floor
@@ -42,6 +31,12 @@ class PixelSprite(val rows: List<String>, private val palette: Map<Char, Color>)
     }
 }
 
+/** Every cat sprite and accessory layer is exactly this many pixels wide and tall. */
+object CatCanvas {
+    const val WIDTH = 16
+    const val HEIGHT = 20
+}
+
 object Sprites {
     private val catPalette = mapOf(
         'o' to CozyPalette.WarmBrown,
@@ -51,8 +46,10 @@ object Sprites {
         'w' to CozyPalette.Cream
     )
 
+    /** The cat on a shared [CatCanvas]; accessory layers use the exact same grid so they line up. */
     val cat: PixelSprite = PixelSprite.mirrored(
         listOf(
+            "........", "........", "........", "........", // headroom for hats
             "........",
             ".oo.....",
             ".opoo...",
@@ -243,31 +240,4 @@ fun PixelSpriteImage(
             }
         }
     }
-}
-
-/** The cat with an optional slow, gentle bob. The animation is skipped when [animate] is false. */
-@Composable
-fun BobbingCat(
-    animate: Boolean,
-    contentDescription: String,
-    modifier: Modifier = Modifier
-) {
-    val bob: State<Float> = if (animate) {
-        rememberInfiniteTransition(label = "catBob").animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "catBobOffset"
-        )
-    } else {
-        remember { mutableStateOf(0f) }
-    }
-    PixelSpriteImage(
-        sprite = Sprites.cat,
-        contentDescription = contentDescription,
-        modifier = modifier.graphicsLayer { translationY = -bob.value * 5.dp.toPx() }
-    )
 }

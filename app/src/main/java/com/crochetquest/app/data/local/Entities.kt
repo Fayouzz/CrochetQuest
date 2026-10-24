@@ -110,3 +110,21 @@ data class AchievementUnlock(
     val achievementKey: String,
     val unlockedAt: Long
 )
+
+/** A cosmetic the player owns. Ownership is permanent; (itemKey) is unique so it can't be bought twice. */
+@Entity(
+    tableName = "inventory_item",
+    indices = [Index(value = ["itemKey"], unique = true)]
+)
+data class InventoryItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val itemKey: String,
+    val purchasedAt: Long
+)
+
+/** What the cat currently wears: one row per slot (the slot name is the primary key). */
+@Entity(tableName = "equipped_cosmetic")
+data class EquippedCosmetic(
+    @PrimaryKey val accessorySlot: String,
+    val itemKey: String
+)

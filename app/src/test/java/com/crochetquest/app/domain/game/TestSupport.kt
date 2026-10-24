@@ -2,6 +2,8 @@ package com.crochetquest.app.domain.game
 
 import com.crochetquest.app.data.local.AchievementUnlock
 import com.crochetquest.app.data.local.CrochetSession
+import com.crochetquest.app.data.local.EquippedCosmetic
+import com.crochetquest.app.data.local.InventoryItem
 import com.crochetquest.app.data.local.PlayerProfile
 import com.crochetquest.app.data.local.Project
 import com.crochetquest.app.data.local.ProjectUpdate
@@ -30,6 +32,8 @@ class FakeGameStore : GameStore {
     val projectUpdates = mutableListOf<ProjectUpdate>()
     val completions = mutableListOf<QuestCompletion>()
     val unlocks = mutableListOf<AchievementUnlock>()
+    val inventory = mutableListOf<InventoryItem>()
+    val equipped = mutableMapOf<String, String>()
     private var nextProjectId = 1L
 
     override suspend fun <T> inTransaction(block: suspend () -> T): T = block()
@@ -126,5 +130,34 @@ class FakeGameStore : GameStore {
         if (unlocks.any { it.achievementKey == unlock.achievementKey }) return false
         unlocks += unlock
         return true
+    }
+
+    override suspend fun allInventory(): List<InventoryItem> = inventory.toList()
+
+    override suspend fun insertInventoryItemIfAbsent(item: InventoryItem): Boolean {
+        if (inventory.any { it.itemKey == item.itemKey }) return false
+        inventory += item
+        return true
+    }
+
+    override suspend fun allEquipped(): List<EquippedCosmetic> =
+        equipped.map { (slot, key) -> EquippedCosmetic(slot, key) }
+
+    override suspend fun setEquipped(slot: String, itemKey: String) {
+        equipped[slot] = itemKey
+    }
+
+    override suspend fun clearEquipped(slot: String) {
+        equipped.remove(slot)
+    }
+
+    override suspend fun clearAllEquipped() {
+        equipped.clear()
+    }
+
+    override suspend fun resetAllData() {
+        profile = null
+        sessions.clear(); stitches.clear(); projects.clear(); projectUpdates.clear()
+        completions.clear(); unlocks.clear(); inventory.clear(); equipped.clear()
     }
 }

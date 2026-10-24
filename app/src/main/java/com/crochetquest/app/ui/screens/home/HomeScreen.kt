@@ -1,7 +1,7 @@
 package com.crochetquest.app.ui.screens.home
 
-import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,13 +31,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -45,11 +43,12 @@ import com.crochetquest.app.domain.game.RewardConfig
 import com.crochetquest.app.domain.quests.QuestItem
 import com.crochetquest.app.domain.quests.QuestStatus
 import com.crochetquest.app.ui.GameUiState
-import com.crochetquest.app.ui.components.BobbingCat
+import com.crochetquest.app.ui.components.AnimatedCat
 import com.crochetquest.app.ui.components.CozyCard
 import com.crochetquest.app.ui.components.PixelSpriteImage
 import com.crochetquest.app.ui.components.Sprites
 import com.crochetquest.app.ui.screens.projects.ProgressBar
+import com.crochetquest.app.ui.util.rememberAnimationsAllowed
 
 @Composable
 fun HomeScreen(
@@ -61,6 +60,7 @@ fun HomeScreen(
     onAddProject: () -> Unit,
     onOpenProject: (Long) -> Unit,
     onClaimQuest: (questKey: String, periodKey: String) -> Unit,
+    onOpenWardrobe: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showSessionDialog by rememberSaveable { mutableStateOf(false) }
@@ -84,7 +84,7 @@ fun HomeScreen(
         }
 
         ProgressCard(state)
-        CatCard(state, animate)
+        CatCard(state, animate, onOpenWardrobe)
 
         Button(
             onClick = { showSessionDialog = true },
@@ -156,7 +156,7 @@ private fun ProgressCard(state: GameUiState.Ready) {
 }
 
 @Composable
-private fun CatCard(state: GameUiState.Ready, animate: Boolean) {
+private fun CatCard(state: GameUiState.Ready, animate: Boolean, onOpenWardrobe: () -> Unit) {
     CozyCard(
         modifier = Modifier.fillMaxWidth(),
         containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -169,10 +169,15 @@ private fun CatCard(state: GameUiState.Ready, animate: Boolean) {
         ) {
             PixelSpriteImage(Sprites.plant, Modifier.size(56.dp))
             Spacer(Modifier.width(8.dp))
-            BobbingCat(
+            // Tapping the cat opens the wardrobe.
+            AnimatedCat(
+                catName = state.catName,
+                accessoryKeys = state.equippedKeys,
                 animate = animate,
-                contentDescription = "${state.catName}, your pixel-art cat companion",
-                modifier = Modifier.size(144.dp)
+                modifier = Modifier
+                    .size(width = 128.dp, height = 160.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClickLabel = "Open wardrobe", role = Role.Button, onClick = onOpenWardrobe)
             )
             Spacer(Modifier.width(8.dp))
             PixelSpriteImage(Sprites.yarnBall, Modifier.size(40.dp))
@@ -184,6 +189,12 @@ private fun CatCard(state: GameUiState.Ready, animate: Boolean) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onOpenWardrobe,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.heightIn(min = 48.dp)
+        ) { Text("Open Wardrobe") }
     }
 }
 
@@ -329,7 +340,10 @@ private fun LogSessionDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("How long did you crochet?", style = MaterialTheme.typography.bodyMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
                     DURATION_OPTIONS.forEach { (minutes, label) ->
                         FilterChip(
                             selected = duration == minutes,
@@ -356,18 +370,4 @@ private fun LogSessionDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
-}
-
-/** Respects both the in-app toggle and Android's system "remove animations" setting. */
-@Composable
-private fun rememberAnimationsAllowed(userEnabled: Boolean): Boolean {
-    val context = LocalContext.current
-    val systemScale = remember {
-        AndroidSettings.Global.getFloat(
-            context.contentResolver,
-            AndroidSettings.Global.ANIMATOR_DURATION_SCALE,
-            1f
-        )
-    }
-    return userEnabled && systemScale > 0f
 }

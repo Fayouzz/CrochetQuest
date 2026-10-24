@@ -2,6 +2,8 @@ package com.crochetquest.app.domain.game
 
 import com.crochetquest.app.data.local.AchievementUnlock
 import com.crochetquest.app.data.local.CrochetSession
+import com.crochetquest.app.data.local.EquippedCosmetic
+import com.crochetquest.app.data.local.InventoryItem
 import com.crochetquest.app.data.local.PlayerProfile
 import com.crochetquest.app.data.local.Project
 import com.crochetquest.app.data.local.ProjectUpdate
@@ -58,4 +60,18 @@ interface GameStore {
     // ---- achievements ----
     suspend fun allAchievementUnlocks(): List<AchievementUnlock>
     suspend fun insertAchievementIfAbsent(unlock: AchievementUnlock): Boolean
+
+    // ---- wardrobe ----
+    suspend fun allInventory(): List<InventoryItem>
+
+    /** True if the item was new. The unique index makes double purchases impossible. */
+    suspend fun insertInventoryItemIfAbsent(item: InventoryItem): Boolean
+    suspend fun allEquipped(): List<EquippedCosmetic>
+    suspend fun setEquipped(slot: String, itemKey: String)
+    suspend fun clearEquipped(slot: String)
+    suspend fun clearAllEquipped()
+
+    // ---- reset ----
+    /** Deletes all saved game data (used by "Reset game progress"). */
+    suspend fun resetAllData()
 }

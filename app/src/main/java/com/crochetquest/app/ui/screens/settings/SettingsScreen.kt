@@ -16,13 +16,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,8 +47,10 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onRenameCat: (String) -> Unit,
     onAnimationsChange: (Boolean) -> Unit,
+    onResetProgress: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showResetDialog by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
@@ -110,6 +115,23 @@ fun SettingsScreen(
         }
 
         CozyCard(modifier = Modifier.fillMaxWidth()) {
+            Text("Start over", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Delete all progress, projects, quests, achievements and accessories, and begin again.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = { showResetDialog = true },
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
+                Text("Reset game progress")
+            }
+        }
+
+        CozyCard(modifier = Modifier.fillMaxWidth()) {
             Text("Privacy", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
             Text(
@@ -126,6 +148,28 @@ fun SettingsScreen(
             Text(
                 "Crochet Quest version ${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodyMedium
+            )
+        }
+
+        if (showResetDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetDialog = false },
+                title = { Text("Reset all progress?") },
+                text = {
+                    Text(
+                        "This permanently deletes your XP, yarn balls, projects, quests, achievements " +
+                            "and accessories, and returns to the welcome screen. It can't be undone."
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        showResetDialog = false
+                        onResetProgress()
+                    }) { Text("Yes, reset everything") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetDialog = false }) { Text("Keep my progress") }
+                }
             )
         }
     }

@@ -13,11 +13,31 @@ android {
         applicationId = "com.crochetquest.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0-stage2"
+        versionCode = 3
+        versionName = "1.0.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Optional stable signing key. When the CI provides these environment variables (from GitHub
+    // secrets), debug builds are signed with one fixed key, so a new build installs OVER the old
+    // one and keeps your progress. Without them, Gradle falls back to its normal debug key.
+    // No key or password is stored in this repository.
+    val ciKeystore = System.getenv("SIGNING_KEYSTORE_PATH")
+    if (!ciKeystore.isNullOrBlank() && file(ciKeystore).exists()) {
+        signingConfigs {
+            create("ci") {
+                storeFile = file(ciKeystore)
+                storePassword = System.getenv("SIGNING_STORE_PASSWORD")
+                keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfigs.findByName("ci")?.let { signingConfig = it }
+        }
         release {
             isMinifyEnabled = false
         }
@@ -64,4 +84,12 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+
+    // Instrumented (on-device) UI tests. Run by the optional "Instrumented tests" workflow.
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.09.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

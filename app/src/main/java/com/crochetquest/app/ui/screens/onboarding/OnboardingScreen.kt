@@ -62,7 +62,7 @@ fun OnboardingScreen(onStart: (String) -> Unit, modifier: Modifier = Modifier) {
         PixelSpriteImage(
             sprite = Sprites.cat,
             contentDescription = "A friendly pixel-art cat",
-            modifier = Modifier.size(168.dp)
+            modifier = Modifier.size(width = 136.dp, height = 170.dp)
         )
         Text(
             text = "A little world, one stitch at a time.",

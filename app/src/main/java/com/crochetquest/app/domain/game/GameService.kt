@@ -5,13 +5,21 @@ import com.crochetquest.app.data.local.InventoryItem
 import com.crochetquest.app.data.local.PlayerProfile
 import com.crochetquest.app.data.local.Project
 import com.crochetquest.app.data.local.ProjectUpdate
+import com.crochetquest.app.data.local.ProjectYarnLink
 import com.crochetquest.app.data.local.QuestCompletion
+import com.crochetquest.app.data.local.StashYarn
 import com.crochetquest.app.data.local.StitchRecord
 import com.crochetquest.app.domain.achievements.AchievementCatalog
 import com.crochetquest.app.domain.achievements.AchievementItem
+import com.crochetquest.app.domain.backup.BackupFormatException
+import com.crochetquest.app.domain.backup.BackupSnapshot
 import com.crochetquest.app.domain.cosmetics.AccessorySlot
 import com.crochetquest.app.domain.cosmetics.CosmeticCatalog
 import com.crochetquest.app.domain.cosmetics.PurchaseResult
+import com.crochetquest.app.domain.cosmetics.RoomCatalog
+import com.crochetquest.app.domain.cosmetics.RoomEntry
+import com.crochetquest.app.domain.cosmetics.RoomSlot
+import com.crochetquest.app.domain.cosmetics.RoomState
 import com.crochetquest.app.domain.cosmetics.WardrobeItem
 import com.crochetquest.app.domain.projects.ProjectDraft
 import com.crochetquest.app.domain.projects.ProjectStatus
@@ -21,6 +29,10 @@ import com.crochetquest.app.domain.quests.QuestItem
 import com.crochetquest.app.domain.quests.QuestRule
 import com.crochetquest.app.domain.quests.QuestStatus
 import com.crochetquest.app.domain.quests.periodFor
+import com.crochetquest.app.domain.stash.StashItem
+import com.crochetquest.app.domain.stash.StashLimits
+import com.crochetquest.app.domain.stats.StatsBundle
+import com.crochetquest.app.domain.stats.StatsCalculator
 
 data class SessionResult(
     val xpEarned: Int,
@@ -455,25 +467,37 @@ class GameService(
     // ------------------------------------------------------------------ wardrobe
 
     /**
-     * Buys a cosmetic. Order matters (there is no rollback in tests, and none is needed):
-     * every check happens before anything is written, and the unique inventory index is the
-     * final guard, so a second purchase of the same item can never charge twice.
+     * Buys a cosmetic for the cat. See [buy] for the safety rules.
      */
-    suspend fun purchaseItem(itemKey: String): PurchaseResult = store.inTransaction {
-        val item = CosmeticCatalog.find(itemKey) ?: return@inTransaction PurchaseResult.UNKNOWN_ITEM
-        val profile = store.getProfile() ?: return@inTransaction PurchaseResult.NO_PROFILE
-        if (store.allInventory().any { it.itemKey == itemKey }) {
-            return@inTransaction PurchaseResult.ALREADY_OWNED
-        }
-        val updated = profile.trySpendYarn(item.cost)
-            ?: return@inTransaction PurchaseResult.NOT_ENOUGH_YARN
-        val inserted = store.insertInventoryItemIfAbsent(
-            InventoryItem(itemKey = itemKey, purchasedAt = clock.nowMillis())
-        )
-        if (!inserted) return@inTransaction PurchaseResult.ALREADY_OWNED
-        store.updateProfile(updated)
-        PurchaseResult.SUCCESS
+    suspend fun purchaseItem(itemKey: String): PurchaseResult {
+        val item = CosmeticCatalog.find(itemKey) ?: return PurchaseResult.UNKNOWN_ITEM
+        return buy(item.key, item.cost, requiredLevel = 1)
     }
+
+    /**
+     * Shared purchase path for everything that costs yarn balls. Order matters (there is no
+     * rollback in tests, and none is needed): every check happens before anything is written,
+     * and the unique inventory index is the final guard, so a second purchase of the same item
+     * can never charge twice.
+     */
+    private suspend fun buy(itemKey: String, cost: Int, requiredLevel: Int): PurchaseResult =
+        store.inTransaction {
+            val profile = store.getProfile() ?: return@inTransaction PurchaseResult.NO_PROFILE
+            if (LevelCurve.levelForXp(profile.totalXp) < requiredLevel) {
+                return@inTransaction PurchaseResult.LEVEL_TOO_LOW
+            }
+            if (store.allInventory().any { it.itemKey == itemKey }) {
+                return@inTransaction PurchaseResult.ALREADY_OWNED
+            }
+            val updated = profile.trySpendYarn(cost)
+                ?: return@inTransaction PurchaseResult.NOT_ENOUGH_YARN
+            val inserted = store.insertInventoryItemIfAbsent(
+                InventoryItem(itemKey = itemKey, purchasedAt = clock.nowMillis())
+            )
+            if (!inserted) return@inTransaction PurchaseResult.ALREADY_OWNED
+            store.updateProfile(updated)
+            PurchaseResult.SUCCESS
+        }
 
     /** Wears an owned item, replacing whatever the cat wore in that slot. Free to repeat. */
     suspend fun equipItem(itemKey: String): Boolean = store.inTransaction {
@@ -490,7 +514,9 @@ class GameService(
     }
 
     /** Back to the default appearance. Owned items stay owned. */
-    suspend fun unequipAll() = store.inTransaction { store.clearAllEquipped() }
+    suspend fun unequipAll() = store.inTransaction {
+        AccessorySlot.entries.forEach { store.clearEquipped(it.name) }
+    }
 
     suspend fun wardrobe(): List<WardrobeItem> {
         val owned = store.allInventory().map { it.itemKey }.toSet()
@@ -499,6 +525,128 @@ class GameService(
             val isOwned = item.key in owned
             WardrobeItem(item, owned = isOwned, equipped = isOwned && item.key in worn)
         }
+    }
+
+    // ------------------------------------------------------------------ cozy room
+
+    /** Buys a room decoration. Needs enough yarn balls AND the item's player level. */
+    suspend fun purchaseRoomItem(itemKey: String): PurchaseResult {
+        val item = RoomCatalog.find(itemKey) ?: return PurchaseResult.UNKNOWN_ITEM
+        return buy(item.key, item.cost, item.requiredLevel)
+    }
+
+    /** Places an owned item in its spot, replacing whatever was there. Free to repeat. */
+    suspend fun placeRoomItem(itemKey: String): Boolean = store.inTransaction {
+        val item = RoomCatalog.find(itemKey) ?: return@inTransaction false
+        if (store.allInventory().none { it.itemKey == itemKey }) return@inTransaction false
+        store.setEquipped(item.slot.storageKey, item.key)
+        true
+    }
+
+    suspend fun removeRoomSlot(slot: RoomSlot): Boolean = store.inTransaction {
+        if (store.allEquipped().none { it.accessorySlot == slot.storageKey }) return@inTransaction false
+        store.clearEquipped(slot.storageKey)
+        true
+    }
+
+    suspend fun roomState(): RoomState {
+        val level = store.getProfile()?.let { LevelCurve.levelForXp(it.totalXp) } ?: 1
+        val owned = store.allInventory().map { it.itemKey }.toSet()
+        val placed = store.allEquipped().map { it.itemKey }.toSet()
+        val entries = RoomCatalog.all.map { item ->
+            val isOwned = item.key in owned
+            RoomEntry(
+                item = item,
+                owned = isOwned,
+                placed = isOwned && item.key in placed,
+                unlocked = level >= item.requiredLevel
+            )
+        }
+        return RoomState(entries, level)
+    }
+
+    // ------------------------------------------------------------------ yarn stash
+
+    /**
+     * Adds a yarn color ([id] null) or edits one. The name is required; the amount is kept
+     * between 0 and [StashLimits.MAX_AMOUNT]. Returns the color's id, or null if invalid.
+     */
+    suspend fun saveStashYarn(id: Long?, name: String, colorArgb: Int, amount: Int): Long? =
+        store.inTransaction {
+            val cleanName = cleanText(name, StashLimits.MAX_NAME_LENGTH) ?: return@inTransaction null
+            val cleanAmount = amount.coerceIn(0, StashLimits.MAX_AMOUNT)
+            if (id == null) {
+                store.insertStashYarn(
+                    StashYarn(
+                        name = cleanName, colorArgb = colorArgb, amount = cleanAmount,
+                        createdAt = clock.nowMillis()
+                    )
+                )
+            } else {
+                val existing = store.getStashYarn(id) ?: return@inTransaction null
+                store.updateStashYarn(existing.copy(name = cleanName, colorArgb = colorArgb, amount = cleanAmount))
+                id
+            }
+        }
+
+    /** Adds or removes skeins (never below 0 or above the maximum). */
+    suspend fun adjustStashAmount(id: Long, delta: Int): Boolean = store.inTransaction {
+        val yarn = store.getStashYarn(id) ?: return@inTransaction false
+        store.updateStashYarn(yarn.copy(amount = (yarn.amount.toLong() + delta).coerceIn(0L, StashLimits.MAX_AMOUNT.toLong()).toInt()))
+        true
+    }
+
+    suspend fun deleteStashYarn(id: Long): Boolean = store.inTransaction {
+        if (store.getStashYarn(id) == null) return@inTransaction false
+        store.deleteStashYarn(id)
+        true
+    }
+
+    /**
+     * Makes the project's linked colors exactly [yarnIds] (unknown colors are ignored).
+     * Returns null if the project doesn't exist. Linking two colors can complete a quest.
+     */
+    suspend fun setProjectYarns(projectId: Long, yarnIds: Set<Long>): ChecksResult? = store.inTransaction {
+        val profile = store.getProfile() ?: return@inTransaction null
+        if (store.getProject(projectId) == null) return@inTransaction null
+        val existingColors = store.allStashYarn().map { it.id }.toSet()
+        val target = yarnIds.filter { it in existingColors }.toSet()
+        val current = store.allProjectYarnLinks().filter { it.projectId == projectId }.map { it.yarnId }.toSet()
+        (current - target).forEach { store.deleteProjectYarnLink(projectId, it) }
+        (target - current).forEach { store.insertProjectYarnLink(ProjectYarnLink(projectId, it)) }
+        engine.runChecks(profile)
+    }
+
+    suspend fun stash(): List<StashItem> {
+        val links = store.allProjectYarnLinks()
+        return store.allStashYarn().map { yarn ->
+            StashItem(yarn, links.filter { it.yarnId == yarn.id }.map { it.projectId }.sorted())
+        }
+    }
+
+    // ------------------------------------------------------------------ stats
+
+    suspend fun statsBundle(): StatsBundle = StatsCalculator.build(
+        nowMillis = clock.nowMillis(),
+        zone = clock.zone,
+        sessions = store.allSessions(),
+        projects = store.allProjects(),
+        stitches = store.allStitches(),
+        unlocks = store.allAchievementUnlocks(),
+        stash = store.allStashYarn()
+    )
+
+    // ------------------------------------------------------------------ backup and restore
+
+    suspend fun createBackup(): BackupSnapshot = store.inTransaction { store.snapshot() }
+
+    /**
+     * Replaces everything with [snapshot] in one transaction. The snapshot must already have
+     * passed BackupCodec.validate. A final check guards against an empty or profile-less restore.
+     */
+    suspend fun restoreBackup(snapshot: BackupSnapshot) {
+        if (snapshot.profile == null) throw BackupFormatException("This backup has no player profile in it.")
+        store.inTransaction { store.replaceAll(snapshot) }
     }
 
     // ------------------------------------------------------------------ reset

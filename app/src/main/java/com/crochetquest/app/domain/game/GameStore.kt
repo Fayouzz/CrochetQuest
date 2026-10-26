@@ -5,6 +5,9 @@ import com.crochetquest.app.data.local.CrochetSession
 import com.crochetquest.app.data.local.EquippedCosmetic
 import com.crochetquest.app.data.local.InventoryItem
 import com.crochetquest.app.data.local.PlayerProfile
+import com.crochetquest.app.data.local.ProjectYarnLink
+import com.crochetquest.app.data.local.StashYarn
+import com.crochetquest.app.domain.backup.BackupSnapshot
 import com.crochetquest.app.data.local.Project
 import com.crochetquest.app.data.local.ProjectUpdate
 import com.crochetquest.app.data.local.QuestCompletion
@@ -74,4 +77,28 @@ interface GameStore {
     // ---- reset ----
     /** Deletes all saved game data (used by "Reset game progress"). */
     suspend fun resetAllData()
+
+    // ---- stats ----
+    suspend fun allSessions(): List<CrochetSession>
+    suspend fun allStitches(): List<StitchRecord>
+    suspend fun allProjects(): List<Project>
+
+    // ---- yarn stash ----
+    suspend fun insertStashYarn(yarn: StashYarn): Long
+    suspend fun updateStashYarn(yarn: StashYarn)
+    suspend fun getStashYarn(id: Long): StashYarn?
+    /** Also removes every link to this color. */
+    suspend fun deleteStashYarn(id: Long)
+    suspend fun allStashYarn(): List<StashYarn>
+    suspend fun allProjectYarnLinks(): List<ProjectYarnLink>
+    suspend fun insertProjectYarnLink(link: ProjectYarnLink)
+    suspend fun deleteProjectYarnLink(projectId: Long, yarnId: Long)
+    /** Number of projects that have at least [min] stash colors linked. */
+    suspend fun countProjectsWithColors(min: Int): Int
+
+    // ---- backup and restore ----
+    suspend fun snapshot(): BackupSnapshot
+
+    /** Replaces ALL saved data with [snapshot]. Always call inside one transaction. */
+    suspend fun replaceAll(snapshot: BackupSnapshot)
 }

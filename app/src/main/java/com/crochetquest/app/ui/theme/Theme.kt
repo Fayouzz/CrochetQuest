@@ -4,6 +4,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -82,6 +83,49 @@ private val Nunito = FontFamily(
 private fun TextStyle.rounded(weight: FontWeight? = null): TextStyle =
     copy(fontFamily = Nunito, fontWeight = weight ?: fontWeight)
 
+/** The "cozy night" palette: warm dusky purples with soft rose and cream text. */
+private object NightPalette {
+    val Background = Color(0xFF1F1B2E)
+    val Card = Color(0xFF2B2640)
+    val CardHigh = Color(0xFF342E4D)
+    val Text = Color(0xFFF5ECE4)
+    val Muted = Color(0xFFC9BDD6)
+    val Rose = Color(0xFFF0B6CE)
+    val RoseContainer = Color(0xFF4A3A5C)
+    val SageContainer = Color(0xFF2F4A45)
+    val LavenderContainer = Color(0xFF3D3560)
+    val Outline = Color(0xFFB59FB8)
+    val OutlineVariant = Color(0xFF4A4163)
+}
+
+private val NightColorScheme = darkColorScheme(
+    primary = NightPalette.Rose,
+    onPrimary = Color(0xFF3D2A35),
+    primaryContainer = NightPalette.RoseContainer,
+    onPrimaryContainer = NightPalette.Text,
+    secondary = Color(0xFFB8A6DB),
+    onSecondary = NightPalette.Background,
+    secondaryContainer = NightPalette.SageContainer,
+    onSecondaryContainer = Color(0xFFE8F0E4),
+    tertiary = Color(0xFFB8A6DB),
+    onTertiary = NightPalette.Background,
+    tertiaryContainer = NightPalette.LavenderContainer,
+    onTertiaryContainer = Color(0xFFE8E1F4),
+    background = NightPalette.Background,
+    onBackground = NightPalette.Text,
+    surface = NightPalette.Card,
+    onSurface = NightPalette.Text,
+    surfaceVariant = NightPalette.RoseContainer,
+    onSurfaceVariant = NightPalette.Muted,
+    surfaceContainerLowest = NightPalette.Card,
+    surfaceContainerLow = NightPalette.Card,
+    surfaceContainer = NightPalette.Card,
+    surfaceContainerHigh = NightPalette.CardHigh,
+    surfaceContainerHighest = NightPalette.CardHigh,
+    outline = NightPalette.Outline,
+    outlineVariant = NightPalette.OutlineVariant
+)
+
 private val baseTypography = Typography()
 private val CozyTypography = Typography(
     displayLarge = baseTypography.displayLarge.rounded(),
@@ -110,9 +154,9 @@ private val CozyShapes = Shapes(
 )
 
 @Composable
-fun CozyTheme(content: @Composable () -> Unit) {
+fun CozyTheme(darkTheme: Boolean = false, content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = CozyColorScheme,
+        colorScheme = if (darkTheme) NightColorScheme else CozyColorScheme,
         typography = CozyTypography,
         shapes = CozyShapes,
         content = content

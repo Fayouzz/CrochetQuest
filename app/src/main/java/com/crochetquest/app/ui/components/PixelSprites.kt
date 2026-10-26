@@ -6,6 +6,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -227,16 +228,31 @@ fun PixelSpriteImage(
         val cell = floor(minOf(size.width / sprite.width, size.height / sprite.height)).coerceAtLeast(1f)
         val offsetX = floor((size.width - cell * sprite.width) / 2f)
         val offsetY = floor((size.height - cell * sprite.height) / 2f)
-        sprite.rows.forEachIndexed { y, row ->
-            row.forEachIndexed { x, char ->
-                val color = sprite.colorAt(char)
-                if (color != null) {
-                    drawRect(
-                        color = silhouette ?: color,
-                        topLeft = Offset(offsetX + x * cell, offsetY + y * cell),
-                        size = Size(cell, cell)
-                    )
-                }
+        drawSprite(sprite, offsetX, offsetY, cell, silhouette)
+    }
+}
+
+/**
+ * Draws [sprite] with its top-left corner at ([left], [top]) using square cells of [cell] pixels.
+ * Used by the sprite image, and by the room, which draws everything in one canvas so all the
+ * pieces share exactly the same pixel grid.
+ */
+fun DrawScope.drawSprite(
+    sprite: PixelSprite,
+    left: Float,
+    top: Float,
+    cell: Float,
+    silhouette: Color? = null
+) {
+    sprite.rows.forEachIndexed { y, row ->
+        row.forEachIndexed { x, char ->
+            val color = sprite.colorAt(char)
+            if (color != null) {
+                drawRect(
+                    color = silhouette ?: color,
+                    topLeft = Offset(left + x * cell, top + y * cell),
+                    size = Size(cell, cell)
+                )
             }
         }
     }

@@ -17,9 +17,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         QuestCompletion::class,
         AchievementUnlock::class,
         InventoryItem::class,
-        EquippedCosmetic::class
+        EquippedCosmetic::class,
+        StashYarn::class,
+        ProjectYarnLink::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class CrochetDatabase : RoomDatabase() {
@@ -33,6 +35,8 @@ abstract class CrochetDatabase : RoomDatabase() {
     abstract fun inventoryDao(): InventoryDao
     abstract fun equippedDao(): EquippedDao
     abstract fun resetDao(): ResetDao
+    abstract fun stashDao(): StashDao
+    abstract fun backupDao(): BackupDao
 
     companion object {
         /** Stage 1 -> Stage 2: purely additive, so existing progress is kept. */
@@ -121,11 +125,31 @@ abstract class CrochetDatabase : RoomDatabase() {
             }
         }
 
+        /** Stage 3 -> Stage 4: adds the yarn stash tables. Purely additive. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `stash_yarn` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`colorArgb` INTEGER NOT NULL, " +
+                        "`amount` INTEGER NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `project_yarn_link` (" +
+                        "`projectId` INTEGER NOT NULL, " +
+                        "`yarnId` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`projectId`, `yarnId`))"
+                )
+            }
+        }
+
         fun create(context: Context): CrochetDatabase =
             Room.databaseBuilder(
                 context.applicationContext,
                 CrochetDatabase::class.java,
                 "crochet_quest.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
     }
 }

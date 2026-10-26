@@ -25,6 +25,19 @@ object CosmeticSprites {
         mapOf('c' to Color(0xFFF6D3A8))
     )
 
+    /** Drifting "z z" above a napping cat. */
+    val zzz: PixelSprite = fullLayer(
+        mapOf(
+            0 to ".............zzz",
+            1 to "..............z.",
+            2 to ".............zzz",
+            4 to "...........zzz..",
+            5 to "............z...",
+            6 to "...........zzz.."
+        ),
+        mapOf('z' to Color(0xFF8E9AD9))
+    )
+
     private val pinkBow = halfLayer(
         mapOf(5 to ".....bb.", 6 to ".....bbd"),
         mapOf('b' to Color(0xFFF27BA8), 'd' to Color(0xFFC25783))

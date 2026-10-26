@@ -9,8 +9,11 @@ import com.crochetquest.app.data.local.InventoryItem
 import com.crochetquest.app.data.local.PlayerProfile
 import com.crochetquest.app.data.local.Project
 import com.crochetquest.app.data.local.ProjectUpdate
+import com.crochetquest.app.data.local.ProjectYarnLink
 import com.crochetquest.app.data.local.QuestCompletion
+import com.crochetquest.app.data.local.StashYarn
 import com.crochetquest.app.data.local.StitchRecord
+import com.crochetquest.app.domain.backup.BackupSnapshot
 import com.crochetquest.app.domain.game.GameStore
 import kotlinx.coroutines.flow.Flow
 
@@ -26,6 +29,8 @@ class GameRepository(private val db: CrochetDatabase) : GameStore {
     private val inventoryDao = db.inventoryDao()
     private val equippedDao = db.equippedDao()
     private val resetDao = db.resetDao()
+    private val stashDao = db.stashDao()
+    private val backupDao = db.backupDao()
 
     // ---- observable state for the UI ----
     val profile: Flow<PlayerProfile?> = profileDao.observe()
@@ -37,6 +42,8 @@ class GameRepository(private val db: CrochetDatabase) : GameStore {
     val achievementUnlocks: Flow<List<AchievementUnlock>> = achievementDao.observeAll()
     val inventory: Flow<List<InventoryItem>> = inventoryDao.observeAll()
     val equipped: Flow<List<EquippedCosmetic>> = equippedDao.observeAll()
+    val stash: Flow<List<StashYarn>> = stashDao.observeAll()
+    val projectYarnLinks: Flow<List<ProjectYarnLink>> = stashDao.observeLinks()
 
     fun observeProjectUpdates(projectId: Long): Flow<List<ProjectUpdate>> =
         projectUpdateDao.observeForProject(projectId)
@@ -78,6 +85,7 @@ class GameRepository(private val db: CrochetDatabase) : GameStore {
 
     override suspend fun deleteProject(id: Long) {
         projectUpdateDao.deleteForProject(id)
+        stashDao.deleteLinksForProject(id)
         projectDao.delete(id)
     }
 
@@ -124,6 +132,8 @@ class GameRepository(private val db: CrochetDatabase) : GameStore {
     override suspend fun clearAllEquipped() = equippedDao.clearAll()
 
     override suspend fun resetAllData() {
+        resetDao.clearStashLinks()
+        resetDao.clearStash()
         resetDao.clearEquipped()
         resetDao.clearInventory()
         resetDao.clearAchievements()
@@ -133,5 +143,62 @@ class GameRepository(private val db: CrochetDatabase) : GameStore {
         resetDao.clearStitches()
         resetDao.clearSessions()
         resetDao.clearProfile()
+    }
+
+    // ---- stats ----
+    override suspend fun allSessions(): List<CrochetSession> = sessionDao.getAll()
+    override suspend fun allStitches(): List<StitchRecord> = stitchDao.getAll()
+    override suspend fun allProjects(): List<Project> = projectDao.getAll()
+
+    // ---- yarn stash ----
+    override suspend fun insertStashYarn(yarn: StashYarn): Long = stashDao.insert(yarn)
+    override suspend fun updateStashYarn(yarn: StashYarn) = stashDao.update(yarn)
+    override suspend fun getStashYarn(id: Long): StashYarn? = stashDao.get(id)
+
+    override suspend fun deleteStashYarn(id: Long) {
+        stashDao.deleteLinksForYarn(id)
+        stashDao.delete(id)
+    }
+
+    override suspend fun allStashYarn(): List<StashYarn> = stashDao.getAll()
+    override suspend fun allProjectYarnLinks(): List<ProjectYarnLink> = stashDao.getAllLinks()
+
+    override suspend fun insertProjectYarnLink(link: ProjectYarnLink) {
+        stashDao.insertLink(link)
+    }
+
+    override suspend fun deleteProjectYarnLink(projectId: Long, yarnId: Long) =
+        stashDao.deleteLink(projectId, yarnId)
+
+    override suspend fun countProjectsWithColors(min: Int): Int = stashDao.countProjectsWithAtLeast(min)
+
+    // ---- backup and restore ----
+    override suspend fun snapshot(): BackupSnapshot = BackupSnapshot(
+        profile = profileDao.get(),
+        sessions = sessionDao.getAll(),
+        stitches = stitchDao.getAll(),
+        projects = projectDao.getAll(),
+        projectUpdates = projectUpdateDao.getAll(),
+        questCompletions = questDao.getAll(),
+        achievements = achievementDao.getAll(),
+        inventory = inventoryDao.getAll(),
+        equipped = equippedDao.getAll(),
+        stash = stashDao.getAll(),
+        projectYarn = stashDao.getAllLinks()
+    )
+
+    override suspend fun replaceAll(snapshot: BackupSnapshot) {
+        resetAllData()
+        backupDao.insertProfile(listOfNotNull(snapshot.profile))
+        backupDao.insertSessions(snapshot.sessions)
+        backupDao.insertStitches(snapshot.stitches)
+        backupDao.insertProjects(snapshot.projects)
+        backupDao.insertProjectUpdates(snapshot.projectUpdates)
+        backupDao.insertQuestCompletions(snapshot.questCompletions)
+        backupDao.insertAchievements(snapshot.achievements)
+        backupDao.insertInventory(snapshot.inventory)
+        backupDao.insertEquipped(snapshot.equipped)
+        backupDao.insertStash(snapshot.stash)
+        backupDao.insertLinks(snapshot.projectYarn)
     }
 }

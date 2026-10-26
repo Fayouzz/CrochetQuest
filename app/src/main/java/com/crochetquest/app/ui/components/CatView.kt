@@ -34,7 +34,8 @@ fun LayeredCat(
     catName: String,
     accessoryKeys: List<String>,
     modifier: Modifier = Modifier,
-    blinking: Boolean = false
+    blinking: Boolean = false,
+    asleep: Boolean = false
 ) {
     val worn = remember(accessoryKeys) {
         accessoryKeys
@@ -42,17 +43,16 @@ fun LayeredCat(
             .filter { CosmeticSprites.forItem(it.key) != null }
             .sortedBy { it.slot.ordinal }
     }
-    val description = if (worn.isEmpty()) {
-        "$catName, your pixel-art cat"
-    } else {
-        "$catName, your pixel-art cat, wearing ${worn.joinToString(", ") { it.name.lowercase() }}"
-    }
+    val wearing = if (worn.isEmpty()) "" else ", wearing ${worn.joinToString(", ") { it.name.lowercase() }}"
+    val sleepy = if (asleep) ", fast asleep" else ""
+    val description = "$catName, your pixel-art cat$wearing$sleepy"
     Box(modifier = modifier.semantics(mergeDescendants = true) { contentDescription = description }) {
         PixelSpriteImage(Sprites.cat, Modifier.fillMaxSize())
-        if (blinking) PixelSpriteImage(CosmeticSprites.blink, Modifier.fillMaxSize())
+        if (blinking || asleep) PixelSpriteImage(CosmeticSprites.blink, Modifier.fillMaxSize())
         worn.forEach { item ->
             CosmeticSprites.forItem(item.key)?.let { PixelSpriteImage(it, Modifier.fillMaxSize()) }
         }
+        if (asleep) PixelSpriteImage(CosmeticSprites.zzz, Modifier.fillMaxSize())
     }
 }
 
@@ -65,7 +65,8 @@ fun AnimatedCat(
     catName: String,
     accessoryKeys: List<String>,
     animate: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    asleep: Boolean = false
 ) {
     val bob: State<Float> = if (animate) {
         rememberInfiniteTransition(label = "catBob").animateFloat(
@@ -96,7 +97,8 @@ fun AnimatedCat(
     LayeredCat(
         catName = catName,
         accessoryKeys = accessoryKeys,
-        blinking = blinking && animate,
+        blinking = blinking && animate && !asleep,
+        asleep = asleep,
         modifier = modifier.graphicsLayer { translationY = -bob.value * 5.dp.toPx() }
     )
 }

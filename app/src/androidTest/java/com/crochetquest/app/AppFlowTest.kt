@@ -2,6 +2,7 @@ package com.crochetquest.app
 
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -129,5 +130,44 @@ class AppFlowTest {
         waitForText("Welcome back, little stitcher!")
         waitForText("Biscuit")
         waitForText("10 / 100 XP to Level 2")
+    }
+
+    @Test
+    fun theSessionTimerCanBeStartedAndCancelled() {
+        startGame()
+        click("Start timer")
+        waitForText("Crocheting right now")
+        click("Cancel timer")
+        waitForText("Log Crochet Session")
+    }
+
+    @Test
+    fun aYarnColorCanBeAddedToTheStash() {
+        startGame()
+        click("Projects")
+        click("Yarn stash")
+        waitForText("Your stash is empty")
+        click("Add yarn color")
+        waitForText("Add a yarn color")
+        compose.onNodeWithText("Color name").performTextInput("Sage green")
+        click("Save")
+        waitForText("Sage green")
+    }
+
+    @Test
+    fun settingsOffersSoundsThemeAndBackup() {
+        startGame()
+        compose.onNodeWithContentDescription("Settings").performClick()
+        waitForText("Sounds and haptics")
+        waitForText("Backup and restore")
+        waitForText("Cozy night")
+    }
+
+    @Test
+    fun theCozyRoomTabShowsTheShop() {
+        startGame()
+        click("Room")
+        waitForText("Cozy Room")
+        waitForText("Round rug")
     }
 }

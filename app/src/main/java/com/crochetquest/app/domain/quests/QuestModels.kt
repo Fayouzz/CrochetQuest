@@ -107,7 +107,7 @@ object QuestCatalog {
         QuestDefinition(
             key = "creative_color_combo",
             title = "Dream up a color combination",
-            description = "Write a new color combination in a project's yarn notes.",
+            description = "Write a color combination in a project's yarn notes, or link two yarn colors to a project.",
             category = QuestCategory.CREATIVE, icon = IconKey.YARN,
             reward = RewardConfig.Reward(xp = 10, yarn = 5),
             repeat = RepeatPolicy.ONCE, rule = QuestRule.ColorNotesAdded

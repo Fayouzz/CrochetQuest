@@ -36,6 +36,9 @@ interface SessionDao {
 
     @Query("SELECT COUNT(*) FROM crochet_session")
     fun observeTotal(): Flow<Int>
+
+    @Query("SELECT * FROM crochet_session ORDER BY id")
+    suspend fun getAll(): List<CrochetSession>
 }
 
 @Dao
@@ -52,6 +55,9 @@ interface StitchDao {
 
     @Query("SELECT COUNT(*) FROM stitch_record")
     fun observeCount(): Flow<Int>
+
+    @Query("SELECT * FROM stitch_record ORDER BY id")
+    suspend fun getAll(): List<StitchRecord>
 }
 
 @Dao
@@ -67,6 +73,9 @@ interface ProjectDao {
 
     @Query("SELECT * FROM project ORDER BY createdAt DESC, id DESC")
     fun observeAll(): Flow<List<Project>>
+
+    @Query("SELECT * FROM project ORDER BY id")
+    suspend fun getAll(): List<Project>
 
     @Query("DELETE FROM project WHERE id = :id")
     suspend fun delete(id: Long)
@@ -100,6 +109,9 @@ interface ProjectUpdateDao {
 
     @Query("SELECT COUNT(*) FROM project_update")
     fun observeTotal(): Flow<Int>
+
+    @Query("SELECT * FROM project_update ORDER BY id")
+    suspend fun getAll(): List<ProjectUpdate>
 }
 
 @Dao
@@ -199,4 +211,71 @@ interface ResetDao {
 
     @Query("DELETE FROM equipped_cosmetic")
     suspend fun clearEquipped()
+
+    @Query("DELETE FROM stash_yarn")
+    suspend fun clearStash()
+
+    @Query("DELETE FROM project_yarn_link")
+    suspend fun clearStashLinks()
+}
+
+@Dao
+interface StashDao {
+    @Insert
+    suspend fun insert(yarn: StashYarn): Long
+
+    @Update
+    suspend fun update(yarn: StashYarn)
+
+    @Query("SELECT * FROM stash_yarn WHERE id = :id")
+    suspend fun get(id: Long): StashYarn?
+
+    @Query("DELETE FROM stash_yarn WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("SELECT * FROM stash_yarn ORDER BY id")
+    suspend fun getAll(): List<StashYarn>
+
+    @Query("SELECT * FROM stash_yarn")
+    fun observeAll(): Flow<List<StashYarn>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertLink(link: ProjectYarnLink): Long
+
+    @Query("DELETE FROM project_yarn_link WHERE projectId = :projectId AND yarnId = :yarnId")
+    suspend fun deleteLink(projectId: Long, yarnId: Long)
+
+    @Query("DELETE FROM project_yarn_link WHERE yarnId = :yarnId")
+    suspend fun deleteLinksForYarn(yarnId: Long)
+
+    @Query("DELETE FROM project_yarn_link WHERE projectId = :projectId")
+    suspend fun deleteLinksForProject(projectId: Long)
+
+    @Query("SELECT * FROM project_yarn_link")
+    suspend fun getAllLinks(): List<ProjectYarnLink>
+
+    @Query("SELECT * FROM project_yarn_link")
+    fun observeLinks(): Flow<List<ProjectYarnLink>>
+
+    @Query(
+        "SELECT COUNT(*) FROM (SELECT projectId FROM project_yarn_link " +
+            "GROUP BY projectId HAVING COUNT(*) >= :min)"
+    )
+    suspend fun countProjectsWithAtLeast(min: Int): Int
+}
+
+/** Bulk inserts used only by "Restore from backup" (after everything has been cleared). */
+@Dao
+interface BackupDao {
+    @Insert suspend fun insertProfile(items: List<PlayerProfile>)
+    @Insert suspend fun insertSessions(items: List<CrochetSession>)
+    @Insert suspend fun insertStitches(items: List<StitchRecord>)
+    @Insert suspend fun insertProjects(items: List<Project>)
+    @Insert suspend fun insertProjectUpdates(items: List<ProjectUpdate>)
+    @Insert suspend fun insertQuestCompletions(items: List<QuestCompletion>)
+    @Insert suspend fun insertAchievements(items: List<AchievementUnlock>)
+    @Insert suspend fun insertInventory(items: List<InventoryItem>)
+    @Insert suspend fun insertEquipped(items: List<EquippedCosmetic>)
+    @Insert suspend fun insertStash(items: List<StashYarn>)
+    @Insert suspend fun insertLinks(items: List<ProjectYarnLink>)
 }

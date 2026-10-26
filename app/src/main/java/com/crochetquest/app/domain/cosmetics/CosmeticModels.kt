@@ -22,7 +22,7 @@ data class CosmeticItem(
 /** An item as shown in the wardrobe. Equipped implies owned. */
 data class WardrobeItem(val item: CosmeticItem, val owned: Boolean, val equipped: Boolean)
 
-enum class PurchaseResult { SUCCESS, NOT_ENOUGH_YARN, ALREADY_OWNED, UNKNOWN_ITEM, NO_PROFILE }
+enum class PurchaseResult { SUCCESS, NOT_ENOUGH_YARN, ALREADY_OWNED, UNKNOWN_ITEM, NO_PROFILE, LEVEL_TOO_LOW }
 
 /** Bundled shop. Stable keys identify items; names and prices can change freely. */
 object CosmeticCatalog {

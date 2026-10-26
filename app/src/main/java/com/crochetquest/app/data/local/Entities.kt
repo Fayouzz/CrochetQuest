@@ -128,3 +128,20 @@ data class EquippedCosmetic(
     @PrimaryKey val accessorySlot: String,
     val itemKey: String
 )
+
+/** A yarn color in the stash: a name, a swatch color and how many skeins are left. */
+@Entity(tableName = "stash_yarn")
+data class StashYarn(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val colorArgb: Int,
+    val amount: Int,
+    val createdAt: Long
+)
+
+/** Links a project to a stash color. A pair can exist only once. */
+@Entity(tableName = "project_yarn_link", primaryKeys = ["projectId", "yarnId"])
+data class ProjectYarnLink(
+    val projectId: Long,
+    val yarnId: Long
+)

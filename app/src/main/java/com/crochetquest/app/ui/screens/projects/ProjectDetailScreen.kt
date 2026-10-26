@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -15,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,11 +33,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.crochetquest.app.data.local.Project
 import com.crochetquest.app.data.local.ProjectUpdate
 import com.crochetquest.app.domain.projects.ProjectStatus
 import com.crochetquest.app.domain.projects.categoryEnum
+import com.crochetquest.app.domain.stash.StashItem
 import com.crochetquest.app.domain.projects.statusEnum
 import com.crochetquest.app.ui.components.CozyCard
 import com.crochetquest.app.ui.util.daysBetween
@@ -46,6 +51,10 @@ import kotlin.math.roundToInt
 fun ProjectDetailScreen(
     project: Project?,
     updates: List<ProjectUpdate>,
+    stash: List<StashItem>,
+    linkedYarnIds: Set<Long>,
+    onSetYarns: (Set<Long>) -> Unit,
+    onShare: () -> Unit,
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onStart: () -> Unit,
@@ -113,6 +122,18 @@ fun ProjectDetailScreen(
         }
 
         ActionsSection(status, onStart, onFinish, onReopen)
+
+        YarnColorsSection(stash, linkedYarnIds, onSetYarns)
+
+        if (status == ProjectStatus.COMPLETED) {
+            OutlinedButton(
+                onClick = onShare,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+            ) { Text("Share a card of your cat and this project") }
+        }
 
         DetailsSection(project)
 
@@ -247,5 +268,78 @@ private fun DetailsSection(project: Project) {
             Text(label, style = MaterialTheme.typography.titleMedium)
             Text(value, style = MaterialTheme.typography.bodyMedium)
         }
+    }
+}
+
+/** The stash colors used in this project, with a picker to change them. */
+@Composable
+private fun YarnColorsSection(
+    stash: List<StashItem>,
+    linkedIds: Set<Long>,
+    onSetYarns: (Set<Long>) -> Unit
+) {
+    var showPicker by rememberSaveable { mutableStateOf(false) }
+    val linked = stash.filter { it.yarn.id in linkedIds }
+    CozyCard(modifier = Modifier.fillMaxWidth()) {
+        Text("Yarn colors", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(6.dp))
+        if (linked.isEmpty()) {
+            Text(
+                if (stash.isEmpty()) "Add colors in the Yarn stash (Projects tab) to link them here."
+                else "No colors linked yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            linked.forEach { item ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                    Swatch(item.yarn.colorArgb, Modifier.size(24.dp))
+                    Text(item.yarn.name, modifier = Modifier.padding(start = 10.dp), style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
+        if (stash.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = { showPicker = true },
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) { Text("Choose yarn colors") }
+        }
+    }
+
+    if (showPicker) {
+        var chosen by rememberSaveable { mutableStateOf(linkedIds.toList()) }
+        AlertDialog(
+            onDismissRequest = { showPicker = false },
+            title = { Text("Yarn colors for this project") },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    stash.forEach { item ->
+                        val isChosen = item.yarn.id in chosen
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .toggleable(value = isChosen, role = Role.Checkbox) { on ->
+                                    chosen = if (on) chosen + item.yarn.id else chosen - item.yarn.id
+                                }
+                        ) {
+                            Checkbox(checked = isChosen, onCheckedChange = null)
+                            Swatch(item.yarn.colorArgb, Modifier.padding(start = 8.dp).size(24.dp))
+                            Text(item.yarn.name, modifier = Modifier.padding(start = 10.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showPicker = false
+                    onSetYarns(chosen.toSet())
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showPicker = false }) { Text("Cancel") } }
+        )
     }
 }

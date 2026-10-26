@@ -29,8 +29,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -42,18 +45,27 @@ import androidx.compose.ui.unit.dp
 import com.crochetquest.app.domain.game.RewardConfig
 import com.crochetquest.app.domain.quests.QuestItem
 import com.crochetquest.app.domain.quests.QuestStatus
+import com.crochetquest.app.domain.stats.formatMinutes
+import com.crochetquest.app.domain.time.minutesForTimer
 import com.crochetquest.app.ui.GameUiState
-import com.crochetquest.app.ui.components.AnimatedCat
 import com.crochetquest.app.ui.components.CozyCard
+import com.crochetquest.app.ui.components.PettableCat
 import com.crochetquest.app.ui.components.PixelSpriteImage
 import com.crochetquest.app.ui.components.Sprites
+import com.crochetquest.app.ui.feedback.FeedbackCue
 import com.crochetquest.app.ui.screens.projects.ProgressBar
 import com.crochetquest.app.ui.util.rememberAnimationsAllowed
+import kotlinx.coroutines.delay
 
 @Composable
 fun HomeScreen(
     state: GameUiState.Ready,
+    reactionTick: Int,
+    onFeedback: (FeedbackCue) -> Unit,
     onLogSession: (durationMinutes: Int?, newStitch: String?) -> Unit,
+    onStartTimer: () -> Unit,
+    onCancelTimer: () -> Unit,
+    onFinishTimer: (newStitch: String?) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenQuests: () -> Unit,
     onOpenProjects: () -> Unit,
@@ -61,10 +73,13 @@ fun HomeScreen(
     onOpenProject: (Long) -> Unit,
     onClaimQuest: (questKey: String, periodKey: String) -> Unit,
     onOpenWardrobe: () -> Unit,
+    onOpenStats: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showSessionDialog by rememberSaveable { mutableStateOf(false) }
+    var showFinishDialog by rememberSaveable { mutableStateOf(false) }
     val animate = rememberAnimationsAllowed(state.animationsEnabled)
+    val timerStart = state.timerStartedAt
 
     Column(
         modifier = modifier
@@ -84,36 +99,64 @@ fun HomeScreen(
         }
 
         ProgressCard(state)
-        CatCard(state, animate, onOpenWardrobe)
+        CatCard(state, animate, reactionTick, onFeedback, onOpenWardrobe)
 
-        Button(
-            onClick = { showSessionDialog = true },
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 56.dp)
-        ) {
-            Text("Log Crochet Session", style = MaterialTheme.typography.titleMedium)
+        if (timerStart == null) {
+            Button(
+                onClick = { showSessionDialog = true },
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+            ) {
+                Text("Log Crochet Session", style = MaterialTheme.typography.titleMedium)
+            }
+            OutlinedButton(
+                onClick = onStartTimer,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+            ) {
+                Text("Start timer", style = MaterialTheme.typography.titleMedium)
+            }
+            Text(
+                text = rewardHint(state),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        } else {
+            TimerCard(
+                startedAt = timerStart,
+                onFinish = { showFinishDialog = true },
+                onCancel = onCancelTimer
+            )
         }
-        Text(
-            text = rewardHint(state),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
 
         FeaturedQuestCard(state.featuredQuest, onOpenQuests, onClaimQuest)
         ProjectsSummaryCard(state, onOpenProjects, onAddProject, onOpenProject)
-        StatsCard(state)
+        StatsCard(state, onOpenStats)
     }
 
     if (showSessionDialog) {
         LogSessionDialog(
+            timerMinutes = null,
             onDismiss = { showSessionDialog = false },
             onConfirm = { minutes, stitch ->
                 showSessionDialog = false
                 onLogSession(minutes, stitch)
+            }
+        )
+    }
+    if (showFinishDialog && timerStart != null) {
+        LogSessionDialog(
+            timerMinutes = minutesForTimer(timerStart, System.currentTimeMillis()),
+            onDismiss = { showFinishDialog = false },
+            onConfirm = { _, stitch ->
+                showFinishDialog = false
+                onFinishTimer(stitch)
             }
         )
     }
@@ -156,7 +199,13 @@ private fun ProgressCard(state: GameUiState.Ready) {
 }
 
 @Composable
-private fun CatCard(state: GameUiState.Ready, animate: Boolean, onOpenWardrobe: () -> Unit) {
+private fun CatCard(
+    state: GameUiState.Ready,
+    animate: Boolean,
+    reactionTick: Int,
+    onFeedback: (FeedbackCue) -> Unit,
+    onOpenWardrobe: () -> Unit
+) {
     CozyCard(
         modifier = Modifier.fillMaxWidth(),
         containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -169,15 +218,15 @@ private fun CatCard(state: GameUiState.Ready, animate: Boolean, onOpenWardrobe: 
         ) {
             PixelSpriteImage(Sprites.plant, Modifier.size(56.dp))
             Spacer(Modifier.width(8.dp))
-            // Tapping the cat opens the wardrobe.
-            AnimatedCat(
+            // Tap to pet: hearts and a purr, never any rewards.
+            PettableCat(
                 catName = state.catName,
                 accessoryKeys = state.equippedKeys,
                 animate = animate,
-                modifier = Modifier
-                    .size(width = 128.dp, height = 160.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable(onClickLabel = "Open wardrobe", role = Role.Button, onClick = onOpenWardrobe)
+                asleep = state.isNight,
+                reactionTick = reactionTick,
+                onPet = { onFeedback(FeedbackCue.PURR) },
+                modifier = Modifier.size(width = 128.dp, height = 160.dp)
             )
             Spacer(Modifier.width(8.dp))
             PixelSpriteImage(Sprites.yarnBall, Modifier.size(40.dp))
@@ -185,7 +234,7 @@ private fun CatCard(state: GameUiState.Ready, animate: Boolean, onOpenWardrobe: 
         Spacer(Modifier.height(8.dp))
         Text(text = state.catName, style = MaterialTheme.typography.titleLarge)
         Text(
-            text = "Your cozy companion",
+            text = if (state.isNight) "${state.catName} is napping. Shh!" else "Tap to pet. No rewards, just purrs.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -198,24 +247,74 @@ private fun CatCard(state: GameUiState.Ready, animate: Boolean, onOpenWardrobe: 
     }
 }
 
+/** Shows the running timer. It reads the start time, so it stays right even if the app was closed. */
 @Composable
-private fun StatsCard(state: GameUiState.Ready) {
+private fun TimerCard(startedAt: Long, onFinish: () -> Unit, onCancel: () -> Unit) {
+    val now by rememberNowMillis()
+    val elapsedSeconds = ((now - startedAt) / 1000L).coerceAtLeast(0L)
+    val clock = "%d:%02d:%02d".format(elapsedSeconds / 3600, (elapsedSeconds / 60) % 60, elapsedSeconds % 60)
+    CozyCard(
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("Crocheting right now", style = MaterialTheme.typography.titleMedium)
+        Text(clock, style = MaterialTheme.typography.headlineLarge)
+        Text(
+            "About ${formatMinutes(minutesForTimer(startedAt, now))} so far. Take all the time you like.",
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = onFinish,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp)
+        ) { Text("Finish and log", style = MaterialTheme.typography.titleMedium) }
+        TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text("Cancel timer")
+        }
+    }
+}
+
+/** Ticks once a second, but only while it is on screen. */
+@Composable
+private fun rememberNowMillis(): State<Long> {
+    val now = remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now.value = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
+    return now
+}
+
+@Composable
+private fun StatsCard(state: GameUiState.Ready, onOpenStats: () -> Unit) {
     CozyCard(modifier = Modifier.fillMaxWidth()) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            Stat(value = state.sessionsLogged, label = "sessions logged")
-            Stat(value = state.stitchesRecorded, label = "stitches discovered")
+            Stat(value = state.sessionsLogged.toString(), label = "sessions logged")
+            Stat(value = formatMinutes(state.stats.gentle.totalMinutes), label = "time crocheted")
+            Stat(value = state.stitchesRecorded.toString(), label = "stitches discovered")
+        }
+        TextButton(onClick = onOpenStats, modifier = Modifier.heightIn(min = 48.dp)) {
+            Text("See your stats and year in yarn")
         }
     }
 }
 
 @Composable
-private fun Stat(value: Int, label: String) {
+private fun Stat(value: String, label: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = value.toString(), style = MaterialTheme.typography.headlineMedium)
+        Text(text = value, style = MaterialTheme.typography.titleLarge)
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
         )
     }
 }
@@ -326,8 +425,13 @@ private fun rewardHint(state: GameUiState.Ready): String =
 
 private val DURATION_OPTIONS = listOf(15 to "15 min", 30 to "30 min", 60 to "1 hour+")
 
+/**
+ * Logs a session. Pass [timerMinutes] when finishing the timer (the duration is then fixed),
+ * or null to choose 15, 30 or 60 minutes by hand.
+ */
 @Composable
 private fun LogSessionDialog(
+    timerMinutes: Int?,
     onDismiss: () -> Unit,
     onConfirm: (durationMinutes: Int?, newStitch: String?) -> Unit
 ) {
@@ -336,20 +440,27 @@ private fun LogSessionDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Log a crochet session") },
+        title = { Text(if (timerMinutes != null) "Finish your session" else "Log a crochet session") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("How long did you crochet?", style = MaterialTheme.typography.bodyMedium)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.horizontalScroll(rememberScrollState())
-                ) {
-                    DURATION_OPTIONS.forEach { (minutes, label) ->
-                        FilterChip(
-                            selected = duration == minutes,
-                            onClick = { duration = minutes },
-                            label = { Text(label) }
-                        )
+                if (timerMinutes != null) {
+                    Text(
+                        "Timer: ${formatMinutes(timerMinutes)}",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                } else {
+                    Text("How long did you crochet?", style = MaterialTheme.typography.bodyMedium)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState())
+                    ) {
+                        DURATION_OPTIONS.forEach { (minutes, label) ->
+                            FilterChip(
+                                selected = duration == minutes,
+                                onClick = { duration = minutes },
+                                label = { Text(label) }
+                            )
+                        }
                     }
                 }
                 OutlinedTextField(
@@ -362,8 +473,8 @@ private fun LogSessionDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(duration, stitch.ifBlank { null }) }) {
-                Text("Log session")
+            Button(onClick = { onConfirm(if (timerMinutes != null) timerMinutes else duration, stitch.ifBlank { null }) }) {
+                Text(if (timerMinutes != null) "Log it" else "Log session")
             }
         },
         dismissButton = {

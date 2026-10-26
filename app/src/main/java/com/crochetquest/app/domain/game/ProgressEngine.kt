@@ -50,7 +50,8 @@ class ProgressEngine(private val store: GameStore, private val clock: GameClock)
             is QuestRule.ProjectsExist -> store.countProjects()
             is QuestRule.ProjectsFinished -> store.countFinishedProjects()
             is QuestRule.FinishedInCategory -> store.countFinishedProjectsInCategory(rule.category.name)
-            QuestRule.ColorNotesAdded -> store.countProjectsWithMaterialNotes()
+            QuestRule.ColorNotesAdded ->
+                if (store.countProjectsWithMaterialNotes() > 0 || store.countProjectsWithColors(2) > 0) 1 else 0
             QuestRule.Manual -> 0
         }
         return current.coerceAtMost(rule.target) to rule.target
